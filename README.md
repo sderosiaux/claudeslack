@@ -76,38 +76,15 @@ claude-code-slack-anywhere --version
 
 ### 1. Create a Slack App
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App**
-2. Choose **From scratch**, name it (e.g., "Claude Relay"), select your workspace
+Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
 
-3. **Enable Socket Mode:**
-   - Go to **Socket Mode** in the sidebar
-   - Toggle it ON
-   - Create an App-Level Token with `connections:write` scope
-   - Save the token (starts with `xapp-...`)
-
-4. **Add Bot Scopes:**
-   - Go to **OAuth & Permissions**
-   - Under **Bot Token Scopes**, add:
-     - `channels:manage` - Create channels
-     - `channels:history` - Read messages
-     - `channels:read` - List channels
-     - `chat:write` - Send messages
-     - `users:read` - Get user info
-
-5. **Subscribe to Events:**
-   - Go to **Event Subscriptions**
-   - Toggle ON
-   - Under **Subscribe to bot events**, add:
-     - `message.channels` - Messages in public channels
-
-6. **Enable Interactivity:**
-   - Go to **Interactivity & Shortcuts**
-   - Toggle ON (no URL needed for Socket Mode)
-
-7. **Install to Workspace:**
-   - Go to **Install App**
-   - Click **Install to Workspace**
-   - Copy the **Bot User OAuth Token** (starts with `xoxb-...`)
+| Setting | Location | Value |
+|---------|----------|-------|
+| Socket Mode | Socket Mode | **ON** + create token with `connections:write` → save `xapp-...` |
+| Bot Scopes | OAuth & Permissions | `channels:manage`, `channels:history`, `channels:read`, `chat:write`, `users:read` |
+| Events | Event Subscriptions | **ON** + add `message.channels` |
+| Interactivity | Interactivity & Shortcuts | **ON** |
+| Install | Install App | Click install → copy `xoxb-...` token |
 
 ### 2. Run Setup
 
@@ -115,10 +92,7 @@ claude-code-slack-anywhere --version
 claude-code-slack-anywhere setup xoxb-YOUR-BOT-TOKEN xapp-YOUR-APP-TOKEN
 ```
 
-When prompted, enter your Slack User ID:
-- In Slack, click your profile picture
-- Click **Profile**
-- Click **...** (more) → **Copy member ID**
+Get your User ID: Slack → Profile → **...** → **Copy member ID**
 
 ### 3. Start Using
 
@@ -137,7 +111,7 @@ That's it! You're ready to control Claude Code from Slack.
 |---------|-------------|
 | `claude-code-slack-anywhere` | Start/attach Claude session in current directory |
 | `claude-code-slack-anywhere -c` | Continue previous session |
-| `claude-code-slack-anywhere "message"` | Send notification (if away mode on) |
+| `claude-code-slack-anywhere "message"` | Send notification to session channel |
 | `claude-code-slack-anywhere doctor` | Check all dependencies |
 | `claude-code-slack-anywhere --help` | Show help |
 
@@ -152,7 +126,6 @@ Type these in any channel where the bot is present:
 | `!kill <name>` | Kill a session |
 | `!list` | List active sessions |
 | `!ping` | Check if bot is alive |
-| `!away` | Toggle away mode |
 | `!c <cmd>` | Run shell command on your machine |
 
 **In a project channel:**
@@ -189,11 +162,10 @@ Config is stored in `~/.ccsa.json`:
   "bot_token": "xoxb-your-bot-token",
   "app_token": "xapp-your-app-token",
   "user_id": "U01234567",
+  "projects_dir": "~/Desktop/ai-projects",
   "sessions": {
-    "myproject": "C01234567",
-    "another-project": "C89012345"
-  },
-  "away": false
+    "myproject": "C01234567"
+  }
 }
 ```
 
@@ -202,8 +174,8 @@ Config is stored in `~/.ccsa.json`:
 | `bot_token` | Slack Bot User OAuth Token (xoxb-...) |
 | `app_token` | Slack App-Level Token (xapp-...) |
 | `user_id` | Your Slack member ID (for authorization) |
+| `projects_dir` | Base directory for projects (default: `~/Desktop/ai-projects`) |
 | `sessions` | Map of session names to channel IDs |
-| `away` | When true, notifications are sent |
 
 ## How It Works
 

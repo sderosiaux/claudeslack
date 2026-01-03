@@ -24,13 +24,52 @@ import (
 
 const version = "2.0.0"
 
+// sanitizeSessionName converts a name to a valid tmux session name
+// Only allows alphanumeric, hyphens, and underscores
+func sanitizeSessionName(name string) string {
+	var result strings.Builder
+	lastWasHyphen := false
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			result.WriteRune(r)
+			lastWasHyphen = false
+		} else if r == ' ' || r == '-' || r == '.' || r == '/' {
+			if !lastWasHyphen && result.Len() > 0 {
+				result.WriteRune('-')
+				lastWasHyphen = true
+			}
+		}
+	}
+	s := result.String()
+	return strings.Trim(s, "-")
+}
+
+// tmuxSessionName returns the tmux session name for a given project name
+func tmuxSessionName(name string) string {
+	return "claude-" + sanitizeSessionName(name)
+}
+
+// getProjectsDir returns the base directory for projects from config or default
+func getProjectsDir(config *Config) string {
+	if config != nil && config.ProjectsDir != "" {
+		// Expand ~ if present
+		if strings.HasPrefix(config.ProjectsDir, "~/") {
+			home, _ := os.UserHomeDir()
+			return filepath.Join(home, config.ProjectsDir[2:])
+		}
+		return config.ProjectsDir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Desktop", "ai-projects")
+}
+
 // Config stores bot configuration and session mappings
 type Config struct {
-	BotToken  string            `json:"bot_token"`  // Slack Bot Token (xoxb-...)
-	AppToken  string            `json:"app_token"`  // Slack App Token (xapp-...) for Socket Mode
-	UserID    string            `json:"user_id"`    // Authorized Slack user ID
-	Sessions  map[string]string `json:"sessions"`   // session name -> channel ID
-	Away      bool              `json:"away"`
+	BotToken    string            `json:"bot_token"`              // Slack Bot Token (xoxb-...)
+	AppToken    string            `json:"app_token"`              // Slack App Token (xapp-...) for Socket Mode
+	UserID      string            `json:"user_id"`                // Authorized Slack user ID
+	Sessions    map[string]string `json:"sessions"`               // session name -> channel ID
+	ProjectsDir string            `json:"projects_dir,omitempty"` // Base directory for projects (default: ~/Desktop/ai-projects)
 }
 
 // Slack API types
@@ -218,15 +257,45 @@ func slackAPIJSON(config *Config, method string, payload interface{}) (*SlackRes
 	return &result, nil
 }
 
-func sendMessage(config *Config, channelID string, text string) error {
+func sendMessage(config *Config, channelID string, text string) (string, error) {
+	const maxLen = 3000
+
+	messages := splitMessage(text, maxLen)
+	var lastTS string
+
+	for _, msg := range messages {
+		params := url.Values{
+			"channel": {channelID},
+			"text":    {msg},
+		}
+
+		result, err := slackAPI(config, "chat.postMessage", params)
+		if err != nil {
+			return "", err
+		}
+		if !result.OK {
+			return "", fmt.Errorf("slack error: %s", result.Error)
+		}
+		lastTS = result.TS
+
+		if len(messages) > 1 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return lastTS, nil
+}
+
+// sendMessageToThread sends a message as a reply to an existing message (thread)
+func sendMessageToThread(config *Config, channelID string, threadTS string, text string) error {
 	const maxLen = 3000
 
 	messages := splitMessage(text, maxLen)
 
 	for _, msg := range messages {
 		params := url.Values{
-			"channel": {channelID},
-			"text":    {msg},
+			"channel":   {channelID},
+			"text":      {msg},
+			"thread_ts": {threadTS},
 		}
 
 		result, err := slackAPI(config, "chat.postMessage", params)
@@ -240,6 +309,58 @@ func sendMessage(config *Config, channelID string, text string) error {
 		if len(messages) > 1 {
 			time.Sleep(100 * time.Millisecond)
 		}
+	}
+	return nil
+}
+
+// sendMessageToThreadGetTS sends a message to a thread and returns its timestamp
+func sendMessageToThreadGetTS(config *Config, channelID string, threadTS string, text string) (string, error) {
+	payload := map[string]interface{}{
+		"channel":   channelID,
+		"text":      text,
+		"thread_ts": threadTS,
+	}
+
+	result, err := slackAPIJSON(config, "chat.postMessage", payload)
+	if err != nil {
+		return "", err
+	}
+	if !result.OK {
+		return "", fmt.Errorf("slack error: %s", result.Error)
+	}
+	return result.TS, nil
+}
+
+func addReaction(config *Config, channelID string, timestamp string, emoji string) error {
+	params := url.Values{
+		"channel":   {channelID},
+		"timestamp": {timestamp},
+		"name":      {emoji},
+	}
+	result, err := slackAPI(config, "reactions.add", params)
+	if err != nil {
+		logf("Reaction error: %v", err)
+		return err
+	}
+	if !result.OK && result.Error != "already_reacted" {
+		logf("Reaction API error: %s", result.Error)
+		return fmt.Errorf("reaction failed: %s", result.Error)
+	}
+	return nil
+}
+
+func removeReaction(config *Config, channelID string, timestamp string, emoji string) error {
+	params := url.Values{
+		"channel":   {channelID},
+		"timestamp": {timestamp},
+		"name":      {emoji},
+	}
+	result, err := slackAPI(config, "reactions.remove", params)
+	if err != nil {
+		return err
+	}
+	if !result.OK && result.Error != "no_reaction" {
+		return fmt.Errorf("remove reaction failed: %s", result.Error)
 	}
 	return nil
 }
@@ -420,10 +541,28 @@ func init() {
 		filepath.Join(home, ".claude", "local", "claude"),
 		"/usr/local/bin/claude",
 	}
+
+	// Add NVM node paths (claude installed via npm)
+	nvmDir := filepath.Join(home, ".nvm", "versions", "node")
+	if entries, err := os.ReadDir(nvmDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				claudePaths = append(claudePaths, filepath.Join(nvmDir, entry.Name(), "bin", "claude"))
+			}
+		}
+	}
+
 	for _, p := range claudePaths {
 		if _, err := os.Stat(p); err == nil {
 			claudePath = p
 			break
+		}
+	}
+
+	// Fallback: find claude in PATH
+	if claudePath == "" {
+		if p, err := exec.LookPath("claude"); err == nil {
+			claudePath = p
 		}
 	}
 }
@@ -475,7 +614,7 @@ func startSession(continueSession bool) error {
 		return err
 	}
 	name := filepath.Base(cwd)
-	tmuxName := "claude-" + name
+	tmuxName := tmuxSessionName(name)
 
 	config, err := loadConfig()
 	if err != nil {
@@ -546,6 +685,188 @@ func killTmuxSession(name string) error {
 	return cmd.Run()
 }
 
+// captureTmuxOutput captures the current visible content of a tmux session
+func captureTmuxOutput(session string, lines int) (string, error) {
+	// capture-pane -p prints to stdout, -S specifies start line (negative = history)
+	args := []string{"-S", tmuxSocket, "capture-pane", "-p", "-t", session}
+	if lines > 0 {
+		// Capture last N lines of scrollback + visible
+		args = append(args, "-S", fmt.Sprintf("-%d", lines))
+	}
+	cmd := exec.Command(tmuxPath, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// streamOutputToThread streams tmux output changes to a Slack thread
+// threadTS is the user's original message - we use reactions to show status
+func streamOutputToThread(config *Config, channelID string, threadTS string, tmuxName string) {
+	// Capture initial output to use as baseline
+	initialOutput, err := captureTmuxOutput(tmuxName, 100)
+	if err != nil {
+		logf("Stream: Failed to capture initial output: %v", err)
+		initialOutput = ""
+	}
+	logf("Stream: Initial output %d chars", len(initialOutput))
+
+	var lastSentOutput string
+	var lastRawOutput string
+	var replyMsgTS string // Track the reply message for updates
+	unchangedCount := 0
+	maxUnchanged := 60 // Stop after 60 seconds of no change
+
+	// Helper to finish streaming with final status
+	finishWithStatus := func(emoji string) {
+		removeReaction(config, channelID, threadTS, "eyes")
+		addReaction(config, channelID, threadTS, emoji)
+	}
+
+	// Wait a moment for Claude to start processing
+	time.Sleep(1 * time.Second)
+
+	for {
+		time.Sleep(2 * time.Second)
+
+		// Check if session still exists
+		if !tmuxSessionExists(tmuxName) {
+			finishWithStatus("octagonal_sign")
+			return
+		}
+
+		// Capture current output
+		currentOutput, err := captureTmuxOutput(tmuxName, 100)
+		if err != nil {
+			continue
+		}
+
+		// Check if raw output changed at all
+		if currentOutput == lastRawOutput {
+			unchangedCount++
+			if unchangedCount >= maxUnchanged {
+				// Finished successfully - mark with green check
+				finishWithStatus("white_check_mark")
+				return
+			}
+			continue
+		}
+		lastRawOutput = currentOutput
+		unchangedCount = 0
+
+		// Find NEW content (what appeared after initial)
+		newContent := getNewContent(initialOutput, currentOutput)
+
+		// Only update if there's new content different from last sent
+		if newContent != "" && newContent != lastSentOutput {
+			displayOutput := newContent
+			if len(displayOutput) > 2500 {
+				displayOutput = "..." + displayOutput[len(displayOutput)-2500:]
+			}
+			logf("Stream: Updating message with %d chars", len(displayOutput))
+
+			// Update the reply message with actual content
+			if replyMsgTS != "" {
+				updateMessage(config, channelID, replyMsgTS, "```\n"+displayOutput+"\n```")
+			} else {
+				// Create first reply in thread
+				replyMsgTS, _ = sendMessageToThreadGetTS(config, channelID, threadTS, "```\n"+displayOutput+"\n```")
+			}
+			lastSentOutput = newContent
+		}
+	}
+}
+
+// isStatusBarLine returns true if the line is a Claude UI status bar element
+func isStatusBarLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
+	}
+	// Status bar indicators
+	if strings.Contains(line, "──") || strings.Contains(line, "└─") || strings.Contains(line, "┘") {
+		return true
+	}
+	if strings.Contains(line, "bypass") || strings.Contains(line, "shift+tab") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "⏵") || strings.HasPrefix(trimmed, ">") && len(trimmed) < 5 {
+		return true
+	}
+	// Cost/token indicators
+	if strings.Contains(line, "Max ]") || strings.Contains(line, "Opus") || strings.Contains(line, "NO GIT") {
+		return true
+	}
+	// Progress/thinking indicators (Transmuting, Tinkering, etc.)
+	if strings.Contains(line, "esc to interrupt") || strings.Contains(line, "tokens") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "* ") && (strings.Contains(line, "...") || strings.Contains(line, "…")) {
+		return true
+	}
+	// Claude status verbs
+	statusVerbs := []string{"Transmuting", "Tinkering", "Thinking", "Analyzing", "Reading", "Writing", "Searching", "Processing"}
+	for _, verb := range statusVerbs {
+		if strings.Contains(trimmed, verb+"...") || strings.Contains(trimmed, verb+"…") {
+			return true
+		}
+	}
+	return false
+}
+
+// getNewContent extracts content that appears in current but not in initial
+func getNewContent(initial, current string) string {
+	if initial == "" {
+		return filterStatusBars(current)
+	}
+
+	initialLines := strings.Split(initial, "\n")
+	currentLines := strings.Split(current, "\n")
+
+	if len(initialLines) == 0 {
+		return filterStatusBars(current)
+	}
+
+	// Build a set of non-status-bar lines from initial
+	initialSet := make(map[string]bool)
+	for _, line := range initialLines {
+		if !isStatusBarLine(line) {
+			initialSet[strings.TrimSpace(line)] = true
+		}
+	}
+
+	// Find lines in current that are new (not in initial and not status bars)
+	var newLines []string
+	for _, line := range currentLines {
+		if isStatusBarLine(line) {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if !initialSet[trimmed] && trimmed != "" {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if len(newLines) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(strings.Join(newLines, "\n"))
+}
+
+// filterStatusBars removes status bar lines from content
+func filterStatusBars(content string) string {
+	lines := strings.Split(content, "\n")
+	var filtered []string
+	for _, line := range lines {
+		if !isStatusBarLine(line) {
+			filtered = append(filtered, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
+}
+
 func listTmuxSessions() ([]string, error) {
 	cmd := exec.Command(tmuxPath, "-S", tmuxSocket, "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.Output()
@@ -597,9 +918,9 @@ func handleHook() error {
 
 	var sessionName string
 	var channelID string
-	home, _ := os.UserHomeDir()
+	baseDir := getProjectsDir(config)
 	for name, cid := range config.Sessions {
-		expectedPath := filepath.Join(home, name)
+		expectedPath := filepath.Join(baseDir, name)
 		if hookData.Cwd == expectedPath || strings.HasSuffix(hookData.Cwd, "/"+name) {
 			sessionName = name
 			channelID = cid
@@ -621,7 +942,8 @@ func handleHook() error {
 	}
 
 	fmt.Fprintf(os.Stderr, "hook: sending message to slack\n")
-	return sendMessage(config, channelID, fmt.Sprintf(":white_check_mark: *%s*\n\n%s", sessionName, lastMessage))
+	_, err = sendMessage(config, channelID, fmt.Sprintf(":white_check_mark: *%s*\n\n%s", sessionName, lastMessage))
+	return err
 }
 
 func handlePermissionHook() error {
@@ -657,12 +979,12 @@ func handlePermissionHook() error {
 
 	var sessionName string
 	var channelID string
-	home, _ := os.UserHomeDir()
+	baseDir := getProjectsDir(config)
 	for name, cid := range config.Sessions {
 		if name == "" {
 			continue
 		}
-		expectedPath := filepath.Join(home, name)
+		expectedPath := filepath.Join(baseDir, name)
 		if hookData.Cwd == expectedPath || strings.HasSuffix(hookData.Cwd, "/"+name) {
 			sessionName = name
 			channelID = cid
@@ -775,9 +1097,9 @@ func handlePromptHook() error {
 	}
 
 	var channelID string
-	home, _ := os.UserHomeDir()
+	baseDir := getProjectsDir(config)
 	for name, cid := range config.Sessions {
-		expectedPath := filepath.Join(home, name)
+		expectedPath := filepath.Join(baseDir, name)
 		if hookData.Cwd == expectedPath || strings.HasSuffix(hookData.Cwd, "/"+name) {
 			channelID = cid
 			break
@@ -794,7 +1116,8 @@ func handlePromptHook() error {
 		prompt = prompt[:500] + "..."
 	}
 	fmt.Fprintf(os.Stderr, "hook-prompt: sending to channel %s\n", channelID)
-	return sendMessage(config, channelID, fmt.Sprintf(":speech_balloon: %s", prompt))
+	_, err = sendMessage(config, channelID, fmt.Sprintf(":speech_balloon: %s", prompt))
+	return err
 }
 
 func handleOutputHook() error {
@@ -822,9 +1145,9 @@ func handleOutputHook() error {
 	}
 
 	var channelID string
-	home, _ := os.UserHomeDir()
+	baseDir := getProjectsDir(config)
 	for name, cid := range config.Sessions {
-		expectedPath := filepath.Join(home, name)
+		expectedPath := filepath.Join(baseDir, name)
 		if hookData.Cwd == expectedPath || strings.HasSuffix(hookData.Cwd, "/"+name) {
 			channelID = cid
 			break
@@ -865,9 +1188,9 @@ func handleQuestionHook() error {
 
 	var sessionName string
 	var channelID string
-	home, _ := os.UserHomeDir()
+	baseDir := getProjectsDir(config)
 	for name, cid := range config.Sessions {
-		expectedPath := filepath.Join(home, name)
+		expectedPath := filepath.Join(baseDir, name)
 		if hookData.Cwd == expectedPath || strings.HasSuffix(hookData.Cwd, "/"+name) {
 			sessionName = name
 			channelID = cid
@@ -992,13 +1315,14 @@ func runClaude(prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	home, _ := os.UserHomeDir()
-	workDir := home
+	config, _ := loadConfig()
+	baseDir := getProjectsDir(config)
+	workDir := baseDir
 
 	words := strings.Fields(prompt)
 	if len(words) > 0 {
 		firstWord := words[0]
-		potentialDir := filepath.Join(home, firstWord)
+		potentialDir := filepath.Join(baseDir, firstWord)
 		if info, err := os.Stat(potentialDir); err == nil && info.IsDir() {
 			workDir = potentialDir
 			prompt = strings.TrimSpace(strings.TrimPrefix(prompt, firstWord))
@@ -1362,12 +1686,20 @@ func doctor() {
 
 // Main listen loop using Socket Mode
 
+func logf(format string, args ...interface{}) {
+	ts := time.Now().Format("15:04:05")
+	fmt.Printf("[%s] %s\n", ts, fmt.Sprintf(format, args...))
+}
+
 func listen() error {
 	myPid := os.Getpid()
+	logf("Starting (PID %d)", myPid)
+
 	cmd := exec.Command("pgrep", "-f", "claude-code-slack-anywhere listen")
 	output, _ := cmd.Output()
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		if pid, err := strconv.Atoi(line); err == nil && pid != myPid {
+			logf("Killing old instance (PID %d)", pid)
 			syscall.Kill(pid, syscall.SIGTERM)
 		}
 	}
@@ -1377,17 +1709,45 @@ func listen() error {
 		return fmt.Errorf("not configured. Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 	}
 
-	fmt.Printf("Bot listening... (user: %s)\n", config.UserID)
-	fmt.Printf("Active sessions: %d\n", len(config.Sessions))
+	logf("Bot listening... (user: %s)", config.UserID)
+	logf("Active sessions: %d", len(config.Sessions))
 	fmt.Println("Press Ctrl+C to stop")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		<-sigChan
-		fmt.Println("\nShutting down...")
+		sig := <-sigChan
+		logf("Received signal: %v - Shutting down...", sig)
 		os.Exit(0)
+	}()
+
+	// Session health monitor - check every 30 seconds
+	go func() {
+		// Track which sessions we've already notified about
+		notified := make(map[string]bool)
+		for {
+			time.Sleep(30 * time.Second)
+			cfg, err := loadConfig()
+			if err != nil {
+				continue
+			}
+			for sessionName, channelID := range cfg.Sessions {
+				tmuxName := tmuxSessionName(sessionName)
+				wasAlive := !notified[sessionName]
+				isAlive := tmuxSessionExists(tmuxName)
+
+				if wasAlive && !isAlive {
+					// Session died - notify
+					logf("Session %s died unexpectedly", tmuxName)
+					sendMessage(cfg, channelID, ":skull: Session died unexpectedly. Use `!continue "+sessionName+"` to restart.")
+					notified[sessionName] = true
+				} else if isAlive {
+					// Session is alive, reset notification state
+					notified[sessionName] = false
+				}
+			}
+		}
 	}()
 
 	// Connect via Socket Mode
@@ -1422,8 +1782,6 @@ func connectSocketMode(config *Config) error {
 	}
 
 	wsURL := connResult.URL
-	fmt.Printf("Connected to Socket Mode\n")
-
 	// Connect WebSocket
 	ws, err := websocket.Dial(wsURL, "", "https://slack.com")
 	if err != nil {
@@ -1450,7 +1808,7 @@ func connectSocketMode(config *Config) error {
 
 		switch envelope.Type {
 		case "hello":
-			fmt.Println("Socket Mode connected")
+			logf("Socket Mode connected")
 
 		case "events_api":
 			var eventCallback EventCallback
@@ -1477,6 +1835,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		Channel string `json:"channel"`
 		User    string `json:"user"`
 		Text    string `json:"text"`
+		TS      string `json:"ts"`
 		BotID   string `json:"bot_id"`
 	}
 	json.Unmarshal(eventData, &event)
@@ -1502,7 +1861,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 
 	channelID := event.Channel
 
-	fmt.Printf("[message] @%s in %s: %s\n", event.User, channelID, text)
+	logf("[message] @%s in %s: %s", event.User, channelID, text)
 
 	// Reload config
 	config, _ = loadConfig()
@@ -1513,14 +1872,23 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		return
 	}
 
-	if strings.HasPrefix(text, "!away") {
-		config.Away = !config.Away
-		saveConfig(config)
-		if config.Away {
-			sendMessage(config, channelID, ":walking: Away mode ON")
-		} else {
-			sendMessage(config, channelID, ":house: Away mode OFF")
-		}
+	if strings.HasPrefix(text, "!help") {
+		helpText := "*Claude Code Slack Anywhere - Commands*\n\n" +
+			":rocket: *Session Management*\n" +
+			"• `!new <name>` - Create new session with channel\n" +
+			"• `!continue [name]` - Continue session (name optional if in session channel)\n" +
+			"• `!kill [name]` - Kill a session (name optional if in session channel)\n" +
+			"• `!list` - List active sessions\n\n" +
+			":computer: *Interaction*\n" +
+			"• `!output [lines]` - Capture Claude's screen (default: 100 lines)\n" +
+			"• `!c <cmd>` - Execute shell command\n\n" +
+			":information_source: *Other*\n" +
+			"• `!ping` - Check if bot is alive\n" +
+			"• `!help` - Show this help\n\n" +
+			":speech_balloon: *In a session channel:*\n" +
+			"• Type messages to talk to Claude\n" +
+			"• Use `//command` for Claude slash commands (e.g., `//help`, `//compact`)"
+		sendMessage(config, channelID, helpText)
 		return
 	}
 
@@ -1534,8 +1902,16 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		return
 	}
 
-	if strings.HasPrefix(text, "!kill ") {
-		name := strings.TrimSpace(strings.TrimPrefix(text, "!kill "))
+	if strings.HasPrefix(text, "!kill") {
+		name := strings.TrimSpace(strings.TrimPrefix(text, "!kill"))
+		// If no arg provided, try to use the session for this channel
+		if name == "" {
+			name = getSessionByChannel(config, channelID)
+		}
+		if name == "" {
+			sendMessage(config, channelID, "Usage: `!kill [name]` - name optional if in session channel")
+			return
+		}
 		if _, exists := config.Sessions[name]; !exists {
 			sendMessage(config, channelID, fmt.Sprintf("Session '%s' not found", name))
 			return
@@ -1544,6 +1920,60 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		delete(config.Sessions, name)
 		saveConfig(config)
 		sendMessage(config, channelID, fmt.Sprintf(":wastebasket: Session '%s' killed", name))
+		return
+	}
+
+	// !output [name] [lines] - capture tmux screen output
+	if strings.HasPrefix(text, "!output") {
+		args := strings.Fields(strings.TrimPrefix(text, "!output"))
+
+		// Determine session name
+		var targetSession string
+		lines := 100 // default lines to capture
+
+		if len(args) >= 1 && args[0] != "" {
+			// Check if first arg is a number (lines) or session name
+			if n, err := strconv.Atoi(args[0]); err == nil {
+				lines = n
+				// No session name provided, try to use current channel's session
+				targetSession = getSessionByChannel(config, channelID)
+			} else {
+				targetSession = args[0]
+				if len(args) >= 2 {
+					if n, err := strconv.Atoi(args[1]); err == nil {
+						lines = n
+					}
+				}
+			}
+		} else {
+			// No args, use current channel's session
+			targetSession = getSessionByChannel(config, channelID)
+		}
+
+		if targetSession == "" {
+			sendMessage(config, channelID, ":x: Usage: `!output [session_name] [lines]`\nOr use in a session channel.")
+			return
+		}
+
+		tmuxName := tmuxSessionName(targetSession)
+		if !tmuxSessionExists(tmuxName) {
+			sendMessage(config, channelID, fmt.Sprintf(":x: Session '%s' not running", targetSession))
+			return
+		}
+
+		output, err := captureTmuxOutput(tmuxName, lines)
+		if err != nil {
+			sendMessage(config, channelID, fmt.Sprintf(":x: Failed to capture output: %v", err))
+			return
+		}
+
+		if output == "" {
+			sendMessage(config, channelID, ":information_source: Screen is empty")
+			return
+		}
+
+		// Send as code block
+		sendMessage(config, channelID, fmt.Sprintf(":computer: *%s* output:\n```\n%s\n```", targetSession, output))
 		return
 	}
 
@@ -1557,15 +1987,20 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		return
 	}
 
-	if strings.HasPrefix(text, "!new ") || strings.HasPrefix(text, "!continue ") {
+	if strings.HasPrefix(text, "!new ") || strings.HasPrefix(text, "!continue") {
 		isNew := strings.HasPrefix(text, "!new ")
 		var arg string
 		if isNew {
 			arg = strings.TrimSpace(strings.TrimPrefix(text, "!new "))
 		} else {
-			arg = strings.TrimSpace(strings.TrimPrefix(text, "!continue "))
+			arg = strings.TrimSpace(strings.TrimPrefix(text, "!continue"))
 		}
 		continueSession := !isNew
+
+		// If no arg provided, try to use the session for this channel
+		if arg == "" {
+			arg = getSessionByChannel(config, channelID)
+		}
 
 		if arg == "" {
 			sendMessage(config, channelID, "Usage: !new <name> or !continue <name>")
@@ -1574,6 +2009,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 
 		// Create channel if needed
 		var targetChannelID string
+		isNewChannel := false
 		if cid, exists := config.Sessions[arg]; exists {
 			targetChannelID = cid
 		} else {
@@ -1585,24 +2021,43 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			targetChannelID = cid
 			config.Sessions[arg] = cid
 			saveConfig(config)
+			isNewChannel = true
 		}
 
-		// Find work directory
-		home, _ := os.UserHomeDir()
-		workDir := filepath.Join(home, arg)
+		// Send immediate feedback with channel link
+		if isNewChannel {
+			sendMessage(config, channelID, fmt.Sprintf(":sparkles: Created <#%s> for `%s`", targetChannelID, arg))
+		} else {
+			sendMessage(config, channelID, fmt.Sprintf(":arrow_right: Using existing <#%s>", targetChannelID))
+		}
+
+		// Find or create work directory
+		baseDir := getProjectsDir(config)
+		workDir := filepath.Join(baseDir, arg)
 		if _, err := os.Stat(workDir); os.IsNotExist(err) {
-			workDir = home
+			// Create the project directory
+			if err := os.MkdirAll(workDir, 0755); err != nil {
+				sendMessage(config, targetChannelID, fmt.Sprintf(":x: Failed to create directory %s: %v", workDir, err))
+				return
+			}
+			sendMessage(config, targetChannelID, fmt.Sprintf(":file_folder: Created `%s`", workDir))
+		} else {
+			sendMessage(config, targetChannelID, fmt.Sprintf(":open_file_folder: Using existing `%s`", workDir))
 		}
 
-		tmuxName := "claude-" + arg
+		// Get tmux session name (sanitized)
+		tmuxName := tmuxSessionName(arg)
+		logf("Creating session: %s -> %s (dir: %s)", arg, tmuxName, workDir)
 
 		// Kill existing if running
 		if tmuxSessionExists(tmuxName) {
+			logf("Killing existing session: %s", tmuxName)
 			killTmuxSession(tmuxName)
 			time.Sleep(300 * time.Millisecond)
 		}
 
 		if err := createTmuxSession(tmuxName, workDir, continueSession); err != nil {
+			logf("Failed to create session: %v", err)
 			sendMessage(config, targetChannelID, fmt.Sprintf(":x: Failed to start: %v", err))
 			return
 		}
@@ -1613,8 +2068,10 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			if continueSession {
 				action = "continued"
 			}
+			logf("Session %s %s successfully", tmuxName, action)
 			sendMessage(config, targetChannelID, fmt.Sprintf(":rocket: Session '%s' %s!\n\nSend messages here to interact with Claude.", arg, action))
 		} else {
+			logf("Session %s died immediately!", tmuxName)
 			sendMessage(config, targetChannelID, ":warning: Session died immediately. Check if ~/bin/claude-code-slack-anywhere works.")
 		}
 		return
@@ -1623,13 +2080,37 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 	// Check if message is in a session channel
 	sessionName := getSessionByChannel(config, channelID)
 	if sessionName != "" {
-		tmuxName := "claude-" + sessionName
+		tmuxName := tmuxSessionName(sessionName)
+		logf("Session found: %s -> tmux: %s", sessionName, tmuxName)
 		if tmuxSessionExists(tmuxName) {
-			if err := sendToTmux(tmuxName, text); err != nil {
-				sendMessage(config, channelID, fmt.Sprintf(":x: Failed to send: %v", err))
+			logf("Tmux session exists, adding reaction to user message...")
+			// Add reaction to user's message instead of sending separate acknowledgment
+			addReaction(config, channelID, event.TS, "eyes")
+
+			// Convert // to / for Claude slash commands (Slack intercepts single /)
+			// e.g., "//help" -> "/help", "//compact" -> "/compact"
+			claudeText := text
+			if strings.HasPrefix(claudeText, "//") {
+				claudeText = strings.TrimPrefix(claudeText, "/")
+				logf("Converted slash command: %s -> %s", text, claudeText)
+			}
+
+			// Add remote context to help Claude understand the user's situation
+			remoteText := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses. IMPORTANT: Do NOT use interactive prompts like AskUserQuestion - I cannot interact with menus. Just proceed with the most reasonable option or ask questions in plain text.] " + claudeText
+			if err := sendToTmux(tmuxName, remoteText); err != nil {
+				logf("Failed to send to tmux: %v", err)
+				addReaction(config, channelID, event.TS, "x")
+				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to send to Claude: %v", err))
+			} else {
+				logf("Message sent to tmux successfully")
+				// Start streaming output as replies to the user's message
+				logf("Starting output stream to thread %s", event.TS)
+				go streamOutputToThread(config, channelID, event.TS, tmuxName)
 			}
 		} else {
-			sendMessage(config, channelID, ":warning: Session not running. Use !new or !continue to restart.")
+			logf("Tmux session does not exist: %s", tmuxName)
+			addReaction(config, channelID, event.TS, "warning")
+			sendMessageToThread(config, channelID, event.TS, "Session not running. Use `!continue` to restart.")
 		}
 		return
 	}
@@ -1680,7 +2161,7 @@ func handleBlockAction(config *Config, action BlockActionPayload) {
 	newText := fmt.Sprintf("%s\n\n:white_check_mark: Selected: *%s*", originalText, act.Value)
 	updateMessage(config, action.Channel.ID, action.Message.TS, newText)
 
-	tmuxName := "claude-" + sessionName
+	tmuxName := tmuxSessionName(sessionName)
 	if tmuxSessionExists(tmuxName) {
 		// Send arrow down keys to select option, then Enter
 		for i := 0; i < optionIndex; i++ {
@@ -1712,11 +2193,11 @@ COMMANDS:
 
 SLACK COMMANDS (in any channel):
     !ping                   Check if bot is alive
-    !away                   Toggle away mode
     !new <name>             Create new session with channel
     !continue <name>        Continue existing session
     !kill <name>            Kill a session
     !list                   List active sessions
+    !output [name] [lines]  Capture Claude's screen output (default: 100 lines)
     !c <cmd>                Execute shell command
 
 FLAGS:
@@ -1831,20 +2312,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		if !config.Away {
-			fmt.Println("Away mode off, skipping notification.")
-			return
-		}
-
 		// Find session channel for current directory
 		cwd, _ := os.Getwd()
-		home, _ := os.UserHomeDir()
+		baseDir := getProjectsDir(config)
 		message := strings.Join(os.Args[1:], " ")
 
 		for name, channelID := range config.Sessions {
-			expectedPath := filepath.Join(home, name)
+			expectedPath := filepath.Join(baseDir, name)
 			if cwd == expectedPath || strings.HasSuffix(cwd, "/"+name) {
-				if err := sendMessage(config, channelID, message); err != nil {
+				if _, err := sendMessage(config, channelID, message); err != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 					os.Exit(1)
 				}
