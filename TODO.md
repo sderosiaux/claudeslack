@@ -3,11 +3,11 @@
 ## High Priority
 
 ### Image Support
-- [ ] Detect image attachments in Slack messages
-- [ ] Download images from Slack (using `files.info` API)
-- [ ] Save images to temp directory
-- [ ] Pass image path to Claude Code prompt (Claude Code supports images)
-- [ ] Clean up temp images after processing
+- [x] Detect image attachments in Slack messages
+- [x] Download images from Slack (using bot token auth)
+- [x] Save images to temp directory
+- [x] Pass image path to Claude Code prompt (Claude Code supports images)
+- [x] Clean up temp images after processing (auto-cleanup every 10 min)
 
 ### Better Output Streaming
 - [ ] Keep final output visible (don't replace with "finished")

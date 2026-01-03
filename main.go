@@ -102,6 +102,16 @@ type SlackMessage struct {
 	BotID     string `json:"bot_id,omitempty"`
 }
 
+// SlackFile represents a file attachment in Slack messages
+type SlackFile struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Mimetype           string `json:"mimetype"`
+	Filetype           string `json:"filetype"`
+	URLPrivateDownload string `json:"url_private_download"`
+	URLPrivate         string `json:"url_private"`
+}
+
 // Socket Mode envelope
 type SocketModeEnvelope struct {
 	Type       string          `json:"type"`
@@ -255,6 +265,99 @@ func slackAPIJSON(config *Config, method string, payload interface{}) (*SlackRes
 	var result SlackResponse
 	json.Unmarshal(body, &result)
 	return &result, nil
+}
+
+// downloadSlackFile downloads a file from Slack to a temp directory
+// Returns the local file path or error
+func downloadSlackFile(config *Config, file SlackFile) (string, error) {
+	// Use url_private_download if available, otherwise url_private
+	downloadURL := file.URLPrivateDownload
+	if downloadURL == "" {
+		downloadURL = file.URLPrivate
+	}
+	if downloadURL == "" {
+		return "", fmt.Errorf("no download URL for file %s", file.Name)
+	}
+
+	req, err := http.NewRequest("GET", downloadURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+config.BotToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download file: HTTP %d", resp.StatusCode)
+	}
+
+	// Create temp directory for images if it doesn't exist
+	tempDir := filepath.Join(os.TempDir(), "ccsa-images")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return "", err
+	}
+
+	// Create unique filename with original extension
+	ext := filepath.Ext(file.Name)
+	if ext == "" {
+		// Infer from mimetype
+		switch file.Mimetype {
+		case "image/png":
+			ext = ".png"
+		case "image/jpeg":
+			ext = ".jpg"
+		case "image/gif":
+			ext = ".gif"
+		case "image/webp":
+			ext = ".webp"
+		default:
+			ext = ".bin"
+		}
+	}
+	localPath := filepath.Join(tempDir, fmt.Sprintf("%s-%d%s", file.ID, time.Now().UnixNano(), ext))
+
+	outFile, err := os.Create(localPath)
+	if err != nil {
+		return "", err
+	}
+	defer outFile.Close()
+
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		os.Remove(localPath)
+		return "", err
+	}
+
+	return localPath, nil
+}
+
+// isImageFile checks if a Slack file is an image
+func isImageFile(file SlackFile) bool {
+	return strings.HasPrefix(file.Mimetype, "image/")
+}
+
+// cleanupTempImages removes old temp images (older than 1 hour)
+func cleanupTempImages() {
+	tempDir := filepath.Join(os.TempDir(), "ccsa-images")
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-1 * time.Hour)
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			os.Remove(filepath.Join(tempDir, entry.Name()))
+		}
+	}
 }
 
 func sendMessage(config *Config, channelID string, text string) (string, error) {
@@ -1750,6 +1853,14 @@ func listen() error {
 		}
 	}()
 
+	// Temp image cleanup - run every 10 minutes
+	go func() {
+		for {
+			time.Sleep(10 * time.Minute)
+			cleanupTempImages()
+		}
+	}()
+
 	// Connect via Socket Mode
 	for {
 		if err := connectSocketMode(config); err != nil {
@@ -1831,12 +1942,13 @@ func connectSocketMode(config *Config) error {
 
 func handleSlackEvent(config *Config, eventData json.RawMessage) {
 	var event struct {
-		Type    string `json:"type"`
-		Channel string `json:"channel"`
-		User    string `json:"user"`
-		Text    string `json:"text"`
-		TS      string `json:"ts"`
-		BotID   string `json:"bot_id"`
+		Type    string      `json:"type"`
+		Channel string      `json:"channel"`
+		User    string      `json:"user"`
+		Text    string      `json:"text"`
+		TS      string      `json:"ts"`
+		BotID   string      `json:"bot_id"`
+		Files   []SlackFile `json:"files"`
 	}
 	json.Unmarshal(eventData, &event)
 
@@ -2093,6 +2205,33 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			if strings.HasPrefix(claudeText, "//") {
 				claudeText = strings.TrimPrefix(claudeText, "/")
 				logf("Converted slash command: %s -> %s", text, claudeText)
+			}
+
+			// Handle image attachments
+			var imagePaths []string
+			for _, file := range event.Files {
+				if isImageFile(file) {
+					logf("Downloading image: %s (%s)", file.Name, file.Mimetype)
+					localPath, err := downloadSlackFile(config, file)
+					if err != nil {
+						logf("Failed to download image %s: %v", file.Name, err)
+						sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":warning: Failed to download image %s: %v", file.Name, err))
+						continue
+					}
+					imagePaths = append(imagePaths, localPath)
+					logf("Downloaded image to: %s", localPath)
+				}
+			}
+
+			// Build prompt with image paths if present
+			if len(imagePaths) > 0 {
+				imageList := strings.Join(imagePaths, " ")
+				if claudeText == "" {
+					claudeText = fmt.Sprintf("Please analyze this image: %s", imageList)
+				} else {
+					claudeText = fmt.Sprintf("%s\n\nImage(s): %s", claudeText, imageList)
+				}
+				logf("Added %d image(s) to prompt", len(imagePaths))
 			}
 
 			// Add remote context to help Claude understand the user's situation
