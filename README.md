@@ -166,10 +166,7 @@ Config is stored in `~/.ccsa.json`:
   "bot_token": "xoxb-your-bot-token",
   "app_token": "xapp-your-app-token",
   "user_id": "U01234567",
-  "projects_dir": "~/Desktop/ai-projects",
-  "sessions": {
-    "myproject": "C01234567"
-  }
+  "projects_dir": "~/Desktop/ai-projects"
 }
 ```
 
@@ -179,7 +176,6 @@ Config is stored in `~/.ccsa.json`:
 | `app_token` | Slack App-Level Token (xapp-...) |
 | `user_id` | Your Slack member ID (for authorization) |
 | `projects_dir` | Base directory for projects (default: `~/Desktop/ai-projects`) |
-| `sessions` | Map of session names to channel IDs |
 
 ## Privacy & Security
 
