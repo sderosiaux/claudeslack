@@ -229,25 +229,20 @@ The only external communication is:
 ## Running as a Service (macOS)
 
 ```bash
-# Install the plist (auto-configures paths)
-sed -e "s|__BINARY_PATH__|$HOME/bin/claude-code-slack-anywhere|g" \
-    -e "s|__HOME__|$HOME|g" \
-    com.ccsa.plist > ~/Library/LaunchAgents/com.ccsa.plist
-
-# Start the service
-launchctl load ~/Library/LaunchAgents/com.ccsa.plist
+./install-service.sh
 ```
+
+This will:
+- Build the binary (if needed)
+- Install to `~/bin/`
+- Configure and start the launchd service
+- Auto-restart on crash or login
 
 **Useful commands:**
 ```bash
-# View logs
-tail -f ~/.ccsa.log
-
-# Restart
-launchctl kickstart -k gui/$(id -u)/com.ccsa
-
-# Stop
-launchctl unload ~/Library/LaunchAgents/com.ccsa.plist
+tail -f ~/.ccsa.log                           # View logs
+launchctl kickstart -k gui/$(id -u)/com.ccsa  # Restart
+launchctl unload ~/Library/LaunchAgents/com.ccsa.plist  # Stop
 ```
 
 ## Contributing
