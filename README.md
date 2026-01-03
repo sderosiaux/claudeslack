@@ -5,6 +5,32 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+```mermaid
+flowchart LR
+    subgraph phone[" "]
+        A[📱 Slack]
+    end
+
+    subgraph pc["Your PC"]
+        B[CCSA Listener]
+        C[tmux]
+        D[Claude Code]
+    end
+
+    A -->|"!new project"| B
+    A -->|"Fix the bug"| B
+    B -->|send-keys| C
+    C --- D
+    D -->|output| C
+    C -->|capture-pane| B
+    B -->|"stream response"| A
+
+    style A fill:#4A154B,color:#fff
+    style B fill:#2D333B,color:#fff
+    style C fill:#1a1a2e,color:#fff
+    style D fill:#D97706,color:#fff
+```
+
 ## Why?
 
 Ever wanted to:
@@ -157,29 +183,6 @@ Config is stored in `~/.ccsa.json`:
 | `user_id` | Your Slack member ID (for authorization) |
 | `projects_dir` | Base directory for projects (default: `~/Desktop/ai-projects`) |
 | `sessions` | Map of session names to channel IDs |
-
-## How It Works
-
-```
-┌─────────────┐     Socket Mode      ┌─────────────┐     send-keys     ┌─────────────┐
-│    Slack    │◄────────────────────►│   Listener  │─────────────────►│    tmux     │
-│   (phone)   │                      │             │                   │   session   │
-└─────────────┘                      │             │                   └──────┬──────┘
-      ▲                              │             │                          │
-      │                              │             │◄── capture-pane ─────────┤
-      │                              │             │    (poll every 2s)       ▼
-      │                              └─────────────┘                   ┌─────────────┐
-      │                                    │                           │ Claude Code │
-      └────────────────────────────────────┘                           └─────────────┘
-              updateMessage() with streamed output
-```
-
-1. `claude-code-slack-anywhere listen` connects to Slack via Socket Mode
-2. `!new` creates a tmux session running Claude Code
-3. Messages in session channels are forwarded to tmux
-4. Listener polls tmux output every 2 seconds
-5. New output is streamed back as an updating Slack message
-6. Reactions indicate status (👀 → ✅)
 
 ## Privacy & Security
 
