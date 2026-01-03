@@ -143,7 +143,7 @@ type HookData struct {
 
 func getConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ccc.json")
+	return filepath.Join(home, ".ccsa.json")
 }
 
 func loadConfig() (*Config, error) {
@@ -393,7 +393,7 @@ func findChannelByName(config *Config, name string) (string, error) {
 var (
 	tmuxSocket string
 	tmuxPath   string
-	cccPath    string
+	binPath    string
 	claudePath string
 )
 
@@ -412,7 +412,7 @@ func init() {
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		cccPath = exe
+		binPath = exe
 	}
 
 	home, _ := os.UserHomeDir()
@@ -434,12 +434,12 @@ func tmuxSessionExists(name string) bool {
 }
 
 func createTmuxSession(name string, workDir string, continueSession bool) error {
-	cccCmd := cccPath + " run"
+	binCmd := binPath + " run"
 	if continueSession {
-		cccCmd += " -c"
+		binCmd += " -c"
 	}
 
-	args := []string{"-S", tmuxSocket, "new-session", "-d", "-s", name, "-c", workDir, "/bin/zsh", "-l", "-c", cccCmd}
+	args := []string{"-S", tmuxSocket, "new-session", "-d", "-s", name, "-c", workDir, "/bin/zsh", "-l", "-c", binCmd}
 
 	cmd := exec.Command(tmuxPath, args...)
 	if err := cmd.Run(); err != nil {
@@ -915,7 +915,7 @@ func handleQuestionHook() error {
 func installHook() error {
 	home, _ := os.UserHomeDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	cccPath := filepath.Join(home, "bin", "ccc")
+	hookBinPath := filepath.Join(home, "bin", "claude-code-slack-anywhere")
 
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
@@ -929,7 +929,7 @@ func installHook() error {
 
 	stopHook := map[string]interface{}{
 		"type":    "command",
-		"command": cccPath + " hook",
+		"command": hookBinPath + " hook",
 	}
 
 	hooks, ok := settings["hooks"].(map[string]interface{})
@@ -1056,15 +1056,15 @@ func installLaunchdService(home string) error {
 		return fmt.Errorf("failed to create LaunchAgents dir: %w", err)
 	}
 
-	plistPath := filepath.Join(plistDir, "com.ccc.plist")
-	logPath := filepath.Join(home, ".ccc.log")
+	plistPath := filepath.Join(plistDir, "com.ccsa.plist")
+	logPath := filepath.Join(home, ".ccsa.log")
 
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ccc</string>
+    <string>com.ccsa</string>
     <key>ProgramArguments</key>
     <array>
         <string>%s</string>
@@ -1080,7 +1080,7 @@ func installLaunchdService(home string) error {
     <string>%s</string>
 </dict>
 </plist>
-`, cccPath, logPath, logPath)
+`, binPath, logPath, logPath)
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("failed to write plist: %w", err)
@@ -1101,9 +1101,9 @@ func installSystemdService(home string) error {
 		return fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
-	servicePath := filepath.Join(serviceDir, "ccc.service")
+	servicePath := filepath.Join(serviceDir, "ccsa.service")
 	service := fmt.Sprintf(`[Unit]
-Description=Claude Code Companion
+Description=Claude Code Slack Anywhere
 After=network.target
 
 [Service]
@@ -1113,15 +1113,15 @@ RestartSec=10
 
 [Install]
 WantedBy=default.target
-`, cccPath)
+`, binPath)
 
 	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
 	}
 
 	exec.Command("systemctl", "--user", "daemon-reload").Run()
-	exec.Command("systemctl", "--user", "enable", "ccc").Run()
-	if err := exec.Command("systemctl", "--user", "start", "ccc").Run(); err != nil {
+	exec.Command("systemctl", "--user", "enable", "ccsa").Run()
+	if err := exec.Command("systemctl", "--user", "start", "ccsa").Run(); err != nil {
 		return fmt.Errorf("failed to start service: %w", err)
 	}
 
@@ -1130,8 +1130,8 @@ WantedBy=default.target
 }
 
 func setup(botToken, appToken string) error {
-	fmt.Println("Claude Code Companion Setup (Slack)")
-	fmt.Println("====================================")
+	fmt.Println("Claude Code Slack Anywhere Setup")
+	fmt.Println("========================")
 	fmt.Println()
 
 	config := &Config{
@@ -1191,7 +1191,7 @@ func setup(botToken, appToken string) error {
 	fmt.Println("Step 3/4: Installing Claude hook...")
 	if err := installHook(); err != nil {
 		fmt.Printf("Hook installation failed: %v\n", err)
-		fmt.Println("   You can install it later with: ccc install")
+		fmt.Println("   You can install it later with: claude-code-slack-anywhere install")
 	} else {
 		fmt.Println()
 	}
@@ -1200,22 +1200,22 @@ func setup(botToken, appToken string) error {
 	fmt.Println("Step 4/4: Installing background service...")
 	if err := installService(); err != nil {
 		fmt.Printf("Service installation failed: %v\n", err)
-		fmt.Println("   You can start manually with: ccc listen")
+		fmt.Println("   You can start manually with: claude-code-slack-anywhere listen")
 	} else {
 		fmt.Println()
 	}
 
 	// Done!
-	fmt.Println("====================================")
+	fmt.Println("========================")
 	fmt.Println("Setup complete!")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  ccc           Start Claude Code in current directory")
-	fmt.Println("  ccc -c        Continue previous session")
+	fmt.Println("  claude-code-slack-anywhere           Start Claude Code in current directory")
+	fmt.Println("  claude-code-slack-anywhere -c        Continue previous session")
 	fmt.Println()
 	fmt.Println("Slack commands (in any channel with the bot):")
-	fmt.Println("  /ccc new <name>   Create new session")
-	fmt.Println("  /ccc list         List sessions")
+	fmt.Println("  !new <name>   Create new session")
+	fmt.Println("  !list         List sessions")
 	fmt.Println()
 	fmt.Println("Or just message in a project channel to interact with Claude.")
 
@@ -1225,8 +1225,8 @@ func setup(botToken, appToken string) error {
 // Doctor - check all dependencies
 
 func doctor() {
-	fmt.Println("ccc doctor")
-	fmt.Println("==========")
+	fmt.Println("claude-code-slack-anywhere doctor")
+	fmt.Println("===================================")
 	fmt.Println()
 
 	allGood := true
@@ -1249,14 +1249,14 @@ func doctor() {
 		allGood = false
 	}
 
-	fmt.Print("ccc in ~/bin...... ")
+	fmt.Print("binary in ~/bin... ")
 	home, _ := os.UserHomeDir()
-	expectedCccPath := filepath.Join(home, "bin", "ccc")
-	if _, err := os.Stat(expectedCccPath); err == nil {
-		fmt.Printf("%s\n", expectedCccPath)
+	expectedBinPath := filepath.Join(home, "bin", "claude-code-slack-anywhere")
+	if _, err := os.Stat(expectedBinPath); err == nil {
+		fmt.Printf("%s\n", expectedBinPath)
 	} else {
 		fmt.Println("not found")
-		fmt.Println("   Run: mkdir -p ~/bin && cp ccc ~/bin/")
+		fmt.Println("   Run: make install")
 		allGood = false
 	}
 
@@ -1264,7 +1264,7 @@ func doctor() {
 	config, err := loadConfig()
 	if err != nil {
 		fmt.Println("not found")
-		fmt.Println("   Run: ccc setup <bot_token> <app_token>")
+		fmt.Println("   Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 		allGood = false
 	} else {
 		fmt.Printf("%s\n", getConfigPath())
@@ -1304,12 +1304,12 @@ func doctor() {
 					fmt.Println("installed")
 				} else {
 					fmt.Println("not installed")
-					fmt.Println("   Run: ccc install")
+					fmt.Println("   Run: claude-code-slack-anywhere install")
 					allGood = false
 				}
 			} else {
 				fmt.Println("not installed")
-				fmt.Println("   Run: ccc install")
+				fmt.Println("   Run: claude-code-slack-anywhere install")
 				allGood = false
 			}
 		} else {
@@ -1321,32 +1321,32 @@ func doctor() {
 
 	fmt.Print("service........... ")
 	if _, err := os.Stat("/Library"); err == nil {
-		plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.ccc.plist")
+		plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.ccsa.plist")
 		if _, err := os.Stat(plistPath); err == nil {
-			cmd := exec.Command("launchctl", "list", "com.ccc")
+			cmd := exec.Command("launchctl", "list", "com.ccsa")
 			if cmd.Run() == nil {
 				fmt.Println("running (launchd)")
 			} else {
 				fmt.Println("installed but not running")
-				fmt.Println("   Run: launchctl load ~/Library/LaunchAgents/com.ccc.plist")
+				fmt.Println("   Run: launchctl load ~/Library/LaunchAgents/com.ccsa.plist")
 			}
 		} else {
 			fmt.Println("not installed")
-			fmt.Println("   Run: ccc setup <bot_token> <app_token>")
+			fmt.Println("   Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 			allGood = false
 		}
 	} else {
-		cmd := exec.Command("systemctl", "--user", "is-active", "ccc")
+		cmd := exec.Command("systemctl", "--user", "is-active", "ccsa")
 		if output, err := cmd.Output(); err == nil && strings.TrimSpace(string(output)) == "active" {
 			fmt.Println("running (systemd)")
 		} else {
-			servicePath := filepath.Join(home, ".config", "systemd", "user", "ccc.service")
+			servicePath := filepath.Join(home, ".config", "systemd", "user", "ccsa.service")
 			if _, err := os.Stat(servicePath); err == nil {
 				fmt.Println("installed but not running")
-				fmt.Println("   Run: systemctl --user start ccc")
+				fmt.Println("   Run: systemctl --user start ccsa")
 			} else {
 				fmt.Println("not installed")
-				fmt.Println("   Run: ccc setup <bot_token> <app_token>")
+				fmt.Println("   Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 				allGood = false
 			}
 		}
@@ -1356,7 +1356,7 @@ func doctor() {
 	if allGood {
 		fmt.Println("All checks passed!")
 	} else {
-		fmt.Println("Some issues found. Fix them and run 'ccc doctor' again.")
+		fmt.Println("Some issues found. Fix them and run 'claude-code-slack-anywhere doctor' again.")
 	}
 }
 
@@ -1364,7 +1364,7 @@ func doctor() {
 
 func listen() error {
 	myPid := os.Getpid()
-	cmd := exec.Command("pgrep", "-f", "ccc listen")
+	cmd := exec.Command("pgrep", "-f", "claude-code-slack-anywhere listen")
 	output, _ := cmd.Output()
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		if pid, err := strconv.Atoi(line); err == nil && pid != myPid {
@@ -1374,7 +1374,7 @@ func listen() error {
 
 	config, err := loadConfig()
 	if err != nil {
-		return fmt.Errorf("not configured. Run: ccc setup <bot_token> <app_token>")
+		return fmt.Errorf("not configured. Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 	}
 
 	fmt.Printf("Bot listening... (user: %s)\n", config.UserID)
@@ -1615,7 +1615,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			}
 			sendMessage(config, targetChannelID, fmt.Sprintf(":rocket: Session '%s' %s!\n\nSend messages here to interact with Claude.", arg, action))
 		} else {
-			sendMessage(config, targetChannelID, ":warning: Session died immediately. Check if ~/bin/ccc works.")
+			sendMessage(config, targetChannelID, ":warning: Session died immediately. Check if ~/bin/claude-code-slack-anywhere works.")
 		}
 		return
 	}
@@ -1693,14 +1693,14 @@ func handleBlockAction(config *Config, action BlockActionPayload) {
 }
 
 func printHelp() {
-	fmt.Printf(`ccc - Claude Code Companion v%s
+	fmt.Printf(`claude-code-slack-anywhere v%s
 
 Control Claude Code remotely via Slack and tmux.
 
 USAGE:
-    ccc                     Start/attach tmux session in current directory
-    ccc -c                  Continue previous session
-    ccc <message>           Send notification (if away mode is on)
+    claude-code-slack-anywhere                Start/attach tmux session in current directory
+    claude-code-slack-anywhere -c             Continue previous session
+    claude-code-slack-anywhere <message>      Send notification (if away mode is on)
 
 COMMANDS:
     setup <bot> <app>       Complete setup (tokens, hook, service)
@@ -1723,7 +1723,7 @@ FLAGS:
     -h, --help              Show this help
     -v, --version           Show version
 
-For more info: https://github.com/sderosiaux/claude-slack-relay-anywhere
+For more info: https://github.com/sderosiaux/claude-code-slack-anywhere
 `, version)
 }
 
@@ -1734,7 +1734,7 @@ func main() {
 			printHelp()
 			return
 		case "-v", "--version", "version":
-			fmt.Printf("ccc version %s\n", version)
+			fmt.Printf("claude-code-slack-anywhere version %s\n", version)
 			return
 		}
 	}
@@ -1763,7 +1763,7 @@ func main() {
 
 	case "setup":
 		if len(os.Args) < 4 {
-			fmt.Println("Usage: ccc setup <bot_token> <app_token>")
+			fmt.Println("Usage: claude-code-slack-anywhere setup <bot_token> <app_token>")
 			fmt.Println()
 			fmt.Println("Get tokens from your Slack App:")
 			fmt.Println("  1. Create app at https://api.slack.com/apps")
@@ -1827,7 +1827,7 @@ func main() {
 		// Send notification
 		config, err := loadConfig()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: not configured. Run: ccc setup <bot_token> <app_token>\n")
+			fmt.Fprintf(os.Stderr, "Error: not configured. Run: claude-code-slack-anywhere setup <bot_token> <app_token>\n")
 			os.Exit(1)
 		}
 

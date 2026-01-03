@@ -106,7 +106,7 @@ func TestConfigSaveLoad(t *testing.T) {
 	}
 
 	// Verify file exists
-	configPath := filepath.Join(tmpDir, ".ccc.json")
+	configPath := filepath.Join(tmpDir, ".ccsa.json")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Fatal("Config file was not created")
 	}
@@ -171,7 +171,7 @@ func TestConfigSessionsInitialized(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	// Write config without sessions field
-	configPath := filepath.Join(tmpDir, ".ccc.json")
+	configPath := filepath.Join(tmpDir, ".ccsa.json")
 	data := []byte(`{"bot_token": "xoxb-test", "app_token": "xapp-test", "user_id": "U123"}`)
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		t.Fatalf("Failed to write test config: %v", err)
@@ -466,7 +466,7 @@ func TestConfigFilePermissions(t *testing.T) {
 		t.Fatalf("saveConfig failed: %v", err)
 	}
 
-	configPath := filepath.Join(tmpDir, ".ccc.json")
+	configPath := filepath.Join(tmpDir, ".ccsa.json")
 	info, err := os.Stat(configPath)
 	if err != nil {
 		t.Fatalf("Failed to stat config file: %v", err)

@@ -1,4 +1,4 @@
-module github.com/sderosiaux/claude-slack-relay-anywhere
+module github.com/sderosiaux/claude-code-slack-anywhere
 
 go 1.21
 

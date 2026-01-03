@@ -1,6 +1,9 @@
 # Binaries
-ccc
+claude-code-slack-anywhere
 *.exe
+
+# Config
+.env
 
 # Test coverage
 coverage.out
