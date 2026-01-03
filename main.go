@@ -72,6 +72,159 @@ type Config struct {
 	ProjectsDir string            `json:"projects_dir,omitempty"` // Base directory for projects (default: ~/Desktop/ai-projects)
 }
 
+// ConfigManager provides thread-safe access to Config
+type ConfigManager struct {
+	mu     sync.RWMutex
+	config *Config
+	path   string
+}
+
+func NewConfigManager() *ConfigManager {
+	return &ConfigManager{
+		path: getConfigPath(),
+	}
+}
+
+func (cm *ConfigManager) Load() error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	data, err := os.ReadFile(cm.path)
+	if err != nil {
+		return err
+	}
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return err
+	}
+	if config.Sessions == nil {
+		config.Sessions = make(map[string]string)
+	}
+	cm.config = &config
+	return nil
+}
+
+func (cm *ConfigManager) Get() *Config {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.config
+}
+
+func (cm *ConfigManager) GetSession(name string) (string, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if cm.config == nil {
+		return "", false
+	}
+	val, ok := cm.config.Sessions[name]
+	return val, ok
+}
+
+func (cm *ConfigManager) SetSession(name, channelID string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.config == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	cm.config.Sessions[name] = channelID
+	return cm.saveLocked()
+}
+
+func (cm *ConfigManager) DeleteSession(name string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.config == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	delete(cm.config.Sessions, name)
+	return cm.saveLocked()
+}
+
+func (cm *ConfigManager) GetSessionByChannel(channelID string) string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if cm.config == nil {
+		return ""
+	}
+	for name, cid := range cm.config.Sessions {
+		if cid == channelID {
+			return name
+		}
+	}
+	return ""
+}
+
+func (cm *ConfigManager) GetAllSessions() map[string]string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if cm.config == nil {
+		return nil
+	}
+	// Return a copy to prevent external mutation
+	sessions := make(map[string]string, len(cm.config.Sessions))
+	for k, v := range cm.config.Sessions {
+		sessions[k] = v
+	}
+	return sessions
+}
+
+func (cm *ConfigManager) saveLocked() error {
+	data, err := json.MarshalIndent(cm.config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cm.path, data, 0600)
+}
+
+// WorkerPool limits concurrent goroutine execution
+type WorkerPool struct {
+	sem chan struct{}
+	wg  sync.WaitGroup
+	ctx context.Context
+}
+
+func NewWorkerPool(ctx context.Context, maxWorkers int) *WorkerPool {
+	return &WorkerPool{
+		sem: make(chan struct{}, maxWorkers),
+		ctx: ctx,
+	}
+}
+
+func (wp *WorkerPool) Submit(task func()) bool {
+	select {
+	case wp.sem <- struct{}{}:
+		wp.wg.Add(1)
+		go func() {
+			defer func() {
+				wp.wg.Done()
+				<-wp.sem
+				if r := recover(); r != nil {
+					logf("PANIC in worker: %v", r)
+				}
+			}()
+			task()
+		}()
+		return true
+	case <-wp.ctx.Done():
+		return false
+	}
+}
+
+func (wp *WorkerPool) Wait() {
+	wp.wg.Wait()
+}
+
+// HTTP client with proper timeouts
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxConnsPerHost:     10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	},
+}
+
 // Slack API types
 
 type SlackResponse struct {
@@ -228,7 +381,7 @@ func slackAPI(config *Config, method string, params url.Values) (*SlackResponse,
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer "+config.BotToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +408,7 @@ func slackAPIJSON(config *Config, method string, payload interface{}) (*SlackRes
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+config.BotToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +438,7 @@ func downloadSlackFile(config *Config, file SlackFile) (string, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+config.BotToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -586,7 +739,7 @@ func findChannelByName(config *Config, name string) (string, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+config.BotToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -610,6 +763,40 @@ func findChannelByName(config *Config, name string) (string, error) {
 	}
 
 	return "", fmt.Errorf("channel not found: %s", name)
+}
+
+func getChannelName(config *Config, channelID string) (string, error) {
+	params := url.Values{
+		"channel": {channelID},
+	}
+
+	req, err := http.NewRequest("GET", "https://slack.com/api/conversations.info?"+params.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+config.BotToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK      bool `json:"ok"`
+		Channel struct {
+			Name string `json:"name"`
+		} `json:"channel"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if !result.OK {
+		return "", fmt.Errorf("failed to get channel info: %s", result.Error)
+	}
+
+	return result.Channel.Name, nil
 }
 
 // Tmux session management
@@ -806,7 +993,7 @@ func captureTmuxOutput(session string, lines int) (string, error) {
 
 // streamOutputToThread streams tmux output changes to a Slack thread
 // threadTS is the user's original message - we use reactions to show status
-func streamOutputToThread(config *Config, channelID string, threadTS string, tmuxName string) {
+func streamOutputToThread(ctx context.Context, config *Config, channelID string, threadTS string, tmuxName string) {
 	// Capture initial output to use as baseline
 	initialOutput, err := captureTmuxOutput(tmuxName, 100)
 	if err != nil {
@@ -828,10 +1015,24 @@ func streamOutputToThread(config *Config, channelID string, threadTS string, tmu
 	}
 
 	// Wait a moment for Claude to start processing
-	time.Sleep(1 * time.Second)
+	select {
+	case <-ctx.Done():
+		logf("Stream: Cancelled before start")
+		return
+	case <-time.After(1 * time.Second):
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
 	for {
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			logf("Stream: Context cancelled for %s", tmuxName)
+			finishWithStatus("octagonal_sign")
+			return
+		case <-ticker.C:
+		}
 
 		// Check if session still exists
 		if !tmuxSessionExists(tmuxName) {
@@ -1050,11 +1251,19 @@ func handleHook() error {
 }
 
 func handlePermissionHook() error {
-	defer func() { recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			logf("PANIC in handlePermissionHook: %v", r)
+		}
+	}()
 
 	stdinData := make(chan []byte, 1)
 	go func() {
-		defer func() { recover() }()
+		defer func() {
+			if r := recover(); r != nil {
+				logf("PANIC reading stdin in hook: %v", r)
+			}
+		}()
 		data, _ := io.ReadAll(os.Stdin)
 		stdinData <- data
 	}()
@@ -1102,7 +1311,11 @@ func handlePermissionHook() error {
 	fmt.Fprintf(os.Stderr, "hook-permission: tool=%s questions=%d\n", hookData.ToolName, len(hookData.ToolInput.Questions))
 	if hookData.ToolName == "AskUserQuestion" && len(hookData.ToolInput.Questions) > 0 {
 		go func() {
-			defer func() { recover() }()
+			defer func() {
+				if r := recover(); r != nil {
+					logf("PANIC in AskUserQuestion handler: %v", r)
+				}
+			}()
 			for qIdx, q := range hookData.ToolInput.Questions {
 				if q.Question == "" {
 					continue
@@ -1134,7 +1347,11 @@ func handlePermissionHook() error {
 	}
 
 	go func() {
-		defer func() { recover() }()
+		defer func() {
+			if r := recover(); r != nil {
+				logf("PANIC in permission notification: %v", r)
+			}
+		}()
 		if hookData.ToolName != "" {
 			msg := fmt.Sprintf(":lock: Permission requested: %s", hookData.ToolName)
 			sendMessage(config, channelID, msg)
@@ -1573,7 +1790,7 @@ func setup(botToken, appToken string) error {
 	// Test bot token
 	req, _ := http.NewRequest("GET", "https://slack.com/api/auth.test", nil)
 	req.Header.Set("Authorization", "Bearer "+botToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Slack: %w", err)
 	}
@@ -1794,6 +2011,12 @@ func logf(format string, args ...interface{}) {
 	fmt.Printf("[%s] %s\n", ts, fmt.Sprintf(format, args...))
 }
 
+// Global config manager and worker pool for graceful shutdown
+var (
+	configMgr  *ConfigManager
+	workerPool *WorkerPool
+)
+
 func listen() error {
 	myPid := os.Getpid()
 	logf("Starting (PID %d)", myPid)
@@ -1807,70 +2030,127 @@ func listen() error {
 		}
 	}
 
-	config, err := loadConfig()
-	if err != nil {
+	// Initialize config manager
+	configMgr = NewConfigManager()
+	if err := configMgr.Load(); err != nil {
 		return fmt.Errorf("not configured. Run: claude-code-slack-anywhere setup <bot_token> <app_token>")
 	}
 
+	config := configMgr.Get()
 	logf("Bot listening... (user: %s)", config.UserID)
-	logf("Active sessions: %d", len(config.Sessions))
+	logf("Active sessions: %d", len(configMgr.GetAllSessions()))
 	fmt.Println("Press Ctrl+C to stop")
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Initialize worker pool (max 50 concurrent handlers)
+	workerPool = NewWorkerPool(ctx, 50)
+
+	// WaitGroup for background goroutines
+	var wg sync.WaitGroup
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigChan
-		logf("Received signal: %v - Shutting down...", sig)
+		logf("Received signal: %v - Shutting down gracefully...", sig)
+		cancel() // Cancel context to stop all goroutines
+
+		// Wait for workers to finish (with timeout)
+		done := make(chan struct{})
+		go func() {
+			workerPool.Wait()
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			logf("Graceful shutdown complete")
+		case <-time.After(30 * time.Second):
+			logf("Shutdown timeout, forcing exit")
+		}
 		os.Exit(0)
 	}()
 
 	// Session health monitor - check every 30 seconds
+	wg.Add(1)
 	go func() {
-		// Track which sessions we've already notified about
+		defer wg.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
 		notified := make(map[string]bool)
 		for {
-			time.Sleep(30 * time.Second)
-			cfg, err := loadConfig()
-			if err != nil {
-				continue
-			}
-			for sessionName, channelID := range cfg.Sessions {
-				tmuxName := tmuxSessionName(sessionName)
-				wasAlive := !notified[sessionName]
-				isAlive := tmuxSessionExists(tmuxName)
+			select {
+			case <-ctx.Done():
+				logf("Health monitor stopped")
+				return
+			case <-ticker.C:
+				cfg := configMgr.Get()
+				if cfg == nil {
+					continue
+				}
+				for sessionName, channelID := range configMgr.GetAllSessions() {
+					tmuxName := tmuxSessionName(sessionName)
+					wasAlive := !notified[sessionName]
+					isAlive := tmuxSessionExists(tmuxName)
 
-				if wasAlive && !isAlive {
-					// Session died - notify
-					logf("Session %s died unexpectedly", tmuxName)
-					sendMessage(cfg, channelID, ":skull: Session died unexpectedly. Use `!continue "+sessionName+"` to restart.")
-					notified[sessionName] = true
-				} else if isAlive {
-					// Session is alive, reset notification state
-					notified[sessionName] = false
+					if wasAlive && !isAlive {
+						logf("Session %s died unexpectedly", tmuxName)
+						sendMessage(cfg, channelID, ":skull: Session died unexpectedly. Use `!continue "+sessionName+"` to restart.")
+						notified[sessionName] = true
+					} else if isAlive {
+						notified[sessionName] = false
+					}
 				}
 			}
 		}
 	}()
 
 	// Temp image cleanup - run every 10 minutes
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+
 		for {
-			time.Sleep(10 * time.Minute)
-			cleanupTempImages()
+			select {
+			case <-ctx.Done():
+				logf("Cleanup goroutine stopped")
+				return
+			case <-ticker.C:
+				cleanupTempImages()
+			}
 		}
 	}()
 
 	// Connect via Socket Mode
 	for {
-		if err := connectSocketMode(config); err != nil {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		if err := connectSocketMode(ctx, configMgr); err != nil {
 			fmt.Fprintf(os.Stderr, "Socket Mode error: %v (reconnecting in 5s...)\n", err)
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}
 }
 
-func connectSocketMode(config *Config) error {
+func connectSocketMode(ctx context.Context, cfgMgr *ConfigManager) error {
+	config := cfgMgr.Get()
+
 	// Get WebSocket URL
 	req, err := http.NewRequest("POST", "https://slack.com/api/apps.connections.open", nil)
 	if err != nil {
@@ -1879,7 +2159,7 @@ func connectSocketMode(config *Config) error {
 	req.Header.Set("Authorization", "Bearer "+config.AppToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -1904,6 +2184,14 @@ func connectSocketMode(config *Config) error {
 
 	// Handle messages
 	for {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			logf("WebSocket: Context cancelled, closing connection")
+			return nil
+		default:
+		}
+
 		var envelope SocketModeEnvelope
 		if err := websocket.JSON.Receive(ws, &envelope); err != nil {
 			return fmt.Errorf("websocket receive failed: %w", err)
@@ -1926,13 +2214,18 @@ func connectSocketMode(config *Config) error {
 			json.Unmarshal(envelope.Payload, &eventCallback)
 
 			if eventCallback.Type == "event_callback" {
-				go handleSlackEvent(config, eventCallback.Event)
+				// Use worker pool for bounded concurrency
+				workerPool.Submit(func() {
+					handleSlackEvent(ctx, cfgMgr, eventCallback.Event)
+				})
 			}
 
 		case "interactive":
 			var action BlockActionPayload
 			json.Unmarshal(envelope.Payload, &action)
-			go handleBlockAction(config, action)
+			workerPool.Submit(func() {
+				handleBlockAction(cfgMgr.Get(), action)
+			})
 
 		case "disconnect":
 			return fmt.Errorf("disconnected by server")
@@ -1940,7 +2233,7 @@ func connectSocketMode(config *Config) error {
 	}
 }
 
-func handleSlackEvent(config *Config, eventData json.RawMessage) {
+func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json.RawMessage) {
 	var event struct {
 		Type    string      `json:"type"`
 		Channel string      `json:"channel"`
@@ -1954,6 +2247,13 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 
 	// Ignore bot messages
 	if event.BotID != "" {
+		return
+	}
+
+	// Get current config (thread-safe)
+	config := cfgMgr.Get()
+	if config == nil {
+		logf("Config not loaded")
 		return
 	}
 
@@ -1974,9 +2274,6 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 	channelID := event.Channel
 
 	logf("[message] @%s in %s: %s", event.User, channelID, text)
-
-	// Reload config
-	config, _ = loadConfig()
 
 	// Handle commands
 	if strings.HasPrefix(text, "!ping") {
@@ -2018,19 +2315,18 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		name := strings.TrimSpace(strings.TrimPrefix(text, "!kill"))
 		// If no arg provided, try to use the session for this channel
 		if name == "" {
-			name = getSessionByChannel(config, channelID)
+			name = cfgMgr.GetSessionByChannel(channelID)
 		}
 		if name == "" {
 			sendMessage(config, channelID, "Usage: `!kill [name]` - name optional if in session channel")
 			return
 		}
-		if _, exists := config.Sessions[name]; !exists {
+		if _, exists := cfgMgr.GetSession(name); !exists {
 			sendMessage(config, channelID, fmt.Sprintf("Session '%s' not found", name))
 			return
 		}
 		killTmuxSession(sessionName(name))
-		delete(config.Sessions, name)
-		saveConfig(config)
+		cfgMgr.DeleteSession(name)
 		sendMessage(config, channelID, fmt.Sprintf(":wastebasket: Session '%s' killed", name))
 		return
 	}
@@ -2048,7 +2344,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			if n, err := strconv.Atoi(args[0]); err == nil {
 				lines = n
 				// No session name provided, try to use current channel's session
-				targetSession = getSessionByChannel(config, channelID)
+				targetSession = cfgMgr.GetSessionByChannel(channelID)
 			} else {
 				targetSession = args[0]
 				if len(args) >= 2 {
@@ -2059,7 +2355,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 			}
 		} else {
 			// No args, use current channel's session
-			targetSession = getSessionByChannel(config, channelID)
+			targetSession = cfgMgr.GetSessionByChannel(channelID)
 		}
 
 		if targetSession == "" {
@@ -2111,7 +2407,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 
 		// If no arg provided, try to use the session for this channel
 		if arg == "" {
-			arg = getSessionByChannel(config, channelID)
+			arg = cfgMgr.GetSessionByChannel(channelID)
 		}
 
 		if arg == "" {
@@ -2122,7 +2418,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 		// Create channel if needed
 		var targetChannelID string
 		isNewChannel := false
-		if cid, exists := config.Sessions[arg]; exists {
+		if cid, exists := cfgMgr.GetSession(arg); exists {
 			targetChannelID = cid
 		} else {
 			cid, err := createChannel(config, arg)
@@ -2131,8 +2427,9 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 				return
 			}
 			targetChannelID = cid
-			config.Sessions[arg] = cid
-			saveConfig(config)
+			if err := cfgMgr.SetSession(arg, cid); err != nil {
+				logf("Failed to save session: %v", err)
+			}
 			isNewChannel = true
 		}
 
@@ -2190,7 +2487,7 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 	}
 
 	// Check if message is in a session channel
-	sessionName := getSessionByChannel(config, channelID)
+	sessionName := cfgMgr.GetSessionByChannel(channelID)
 	if sessionName != "" {
 		tmuxName := tmuxSessionName(sessionName)
 		logf("Session found: %s -> tmux: %s", sessionName, tmuxName)
@@ -2244,25 +2541,139 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 				logf("Message sent to tmux successfully")
 				// Start streaming output as replies to the user's message
 				logf("Starting output stream to thread %s", event.TS)
-				go streamOutputToThread(config, channelID, event.TS, tmuxName)
+				// Use worker pool for bounded concurrency with context for cancellation
+				workerPool.Submit(func() {
+					streamOutputToThread(ctx, config, channelID, event.TS, tmuxName)
+				})
 			}
 		} else {
-			logf("Tmux session does not exist: %s", tmuxName)
-			addReaction(config, channelID, event.TS, "warning")
-			sendMessageToThread(config, channelID, event.TS, "Session not running. Use `!continue` to restart.")
+			// Auto-start session if not running
+			logf("Tmux session does not exist: %s - auto-starting", tmuxName)
+			addReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+
+			// Find work directory
+			baseDir := getProjectsDir(config)
+			workDir := filepath.Join(baseDir, sessionName)
+			if _, err := os.Stat(workDir); os.IsNotExist(err) {
+				if err := os.MkdirAll(workDir, 0755); err != nil {
+					logf("Failed to create directory %s: %v", workDir, err)
+					addReaction(config, channelID, event.TS, "x")
+					sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to create directory: %v", err))
+					return
+				}
+			}
+
+			// Start session with --continue flag
+			if err := createTmuxSession(tmuxName, workDir, true); err != nil {
+				logf("Failed to auto-start session: %v", err)
+				addReaction(config, channelID, event.TS, "x")
+				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to start session: %v", err))
+				return
+			}
+
+			// Wait for session to be ready
+			time.Sleep(500 * time.Millisecond)
+			if !tmuxSessionExists(tmuxName) {
+				addReaction(config, channelID, event.TS, "x")
+				sendMessageToThread(config, channelID, event.TS, ":x: Session died immediately after auto-start")
+				return
+			}
+
+			// Remove hourglass, add eyes
+			removeReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+			addReaction(config, channelID, event.TS, "eyes")
+			sendMessageToThread(config, channelID, event.TS, ":rocket: Session auto-resumed!")
+
+			// Now send the message
+			remoteText := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses. IMPORTANT: Do NOT use interactive prompts like AskUserQuestion - I cannot interact with menus. Just proceed with the most reasonable option or ask questions in plain text.] " + text
+			if err := sendToTmux(tmuxName, remoteText); err != nil {
+				logf("Failed to send to tmux after auto-start: %v", err)
+				addReaction(config, channelID, event.TS, "x")
+				return
+			}
+
+			// Start streaming
+			workerPool.Submit(func() {
+				streamOutputToThread(ctx, config, channelID, event.TS, tmuxName)
+			})
 		}
 		return
 	}
 
+	// Try to auto-detect session from channel name
+	channelName, err := getChannelName(config, channelID)
+	if err == nil && channelName != "" {
+		baseDir := getProjectsDir(config)
+
+		// Try exact match first, then with spaces instead of hyphens
+		projectDir := filepath.Join(baseDir, channelName)
+		sessionName := channelName
+
+		if _, err := os.Stat(projectDir); os.IsNotExist(err) {
+			// Try with spaces instead of hyphens (Slack converts spaces to hyphens)
+			altName := strings.ReplaceAll(channelName, "-", " ")
+			altDir := filepath.Join(baseDir, altName)
+			if _, err := os.Stat(altDir); err == nil {
+				projectDir = altDir
+				sessionName = altName
+			}
+		}
+
+		// Check if project directory exists
+		if _, err := os.Stat(projectDir); err == nil {
+			logf("Auto-detected session '%s' from channel '%s' (project dir exists)", sessionName, channelName)
+
+			// Auto-add to sessions (use sessionName as key, which may have spaces)
+			if err := cfgMgr.SetSession(sessionName, channelID); err != nil {
+				logf("Failed to auto-save session: %v", err)
+			}
+
+			// Now handle as session message
+			addReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+
+			tmuxName := tmuxSessionName(sessionName)
+
+			// Check if tmux session exists, if not start it
+			if !tmuxSessionExists(tmuxName) {
+				logf("Auto-starting tmux session: %s", tmuxName)
+				if err := createTmuxSession(tmuxName, projectDir, true); err != nil {
+					logf("Failed to auto-start session: %v", err)
+					addReaction(config, channelID, event.TS, "x")
+					sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to start session: %v", err))
+					return
+				}
+				time.Sleep(500 * time.Millisecond)
+				if !tmuxSessionExists(tmuxName) {
+					addReaction(config, channelID, event.TS, "x")
+					sendMessageToThread(config, channelID, event.TS, ":x: Session died immediately")
+					return
+				}
+				sendMessageToThread(config, channelID, event.TS, ":rocket: Session auto-started!")
+			}
+
+			removeReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+			addReaction(config, channelID, event.TS, "eyes")
+
+			// Send message to tmux
+			remoteText := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses. IMPORTANT: Do NOT use interactive prompts like AskUserQuestion - I cannot interact with menus. Just proceed with the most reasonable option or ask questions in plain text.] " + text
+			if err := sendToTmux(tmuxName, remoteText); err != nil {
+				logf("Failed to send to tmux: %v", err)
+				addReaction(config, channelID, event.TS, "x")
+				return
+			}
+
+			// Start streaming
+			workerPool.Submit(func() {
+				streamOutputToThread(ctx, config, channelID, event.TS, tmuxName)
+			})
+			return
+		}
+	}
+
 	// Otherwise, run one-shot Claude
 	sendMessage(config, channelID, ":robot_face: Running Claude...")
-	go func(p string, cid string) {
-		defer func() {
-			if r := recover(); r != nil {
-				sendMessage(config, cid, fmt.Sprintf(":boom: Panic: %v", r))
-			}
-		}()
-		output, err := runClaude(p)
+	workerPool.Submit(func() {
+		output, err := runClaude(text)
 		if err != nil {
 			if strings.Contains(err.Error(), "context deadline exceeded") {
 				output = fmt.Sprintf(":stopwatch: Timeout (10min)\n\n%s", output)
@@ -2270,8 +2681,8 @@ func handleSlackEvent(config *Config, eventData json.RawMessage) {
 				output = fmt.Sprintf(":warning: %s\n\nExit: %v", output, err)
 			}
 		}
-		sendMessage(config, cid, output)
-	}(text, channelID)
+		sendMessage(config, channelID, output)
+	})
 }
 
 func handleBlockAction(config *Config, action BlockActionPayload) {
