@@ -15,21 +15,17 @@ flowchart LR
 
     subgraph pc["Your PC"]
         B[CCSA Listener]
-        C[tmux]
-        D[Claude Code]
+        D[Claude Code CLI]
     end
 
     A -->|"!new project"| B
     A -->|"Fix the bug"| B
-    B -->|send-keys| C
-    C --- D
-    D -->|output| C
-    C -->|capture-pane| B
-    B -->|"stream response"| A
+    B -->|"claude -p --resume"| D
+    D -->|"JSON response"| B
+    B -->|"stream to thread"| A
 
     style A fill:#4A154B,color:#fff
     style B fill:#2D333B,color:#fff
-    style C fill:#1a1a2e,color:#fff
     style D fill:#D97706,color:#fff
 ```
 
@@ -47,13 +43,13 @@ Ever wanted to:
 - **100% Self-Hosted** - Runs entirely on your machine, no third-party servers
 - **Privacy First** - Your code and conversations never leave your computer
 - **Remote Control** - Start and manage Claude Code sessions entirely from Slack
-- **Live Streaming** - See Claude's output in real-time as a single updating message
+- **Session Continuity** - Uses Claude's `--resume` flag for persistent conversations
 - **Reaction Status** - Visual feedback: 👀 (processing) → ✅ (done)
 - **Multi-Session** - Run multiple concurrent sessions, each with its own Slack channel
 - **Interactive Buttons** - Answer Claude's questions with Block Kit buttons
 - **Auto-Session Detection** - Send a message in any channel matching a project folder → auto-starts
 - **Image Support** - Drop images in Slack to send them to Claude for analysis
-- **tmux Integration** - Sessions persist in tmux
+- **Markdown Conversion** - Claude's markdown renders properly in Slack (headers, bold, tables)
 
 ## Demo Workflow
 
@@ -77,7 +73,6 @@ Slack (phone/desktop)
 
 - macOS, Linux, or Windows (WSL)
 - Go 1.21+
-- [tmux](https://github.com/tmux/tmux)
 - [Claude Code](https://claude.ai/claude-code) installed
 - Slack workspace (free tier works!)
 
@@ -131,10 +126,9 @@ Type these in any channel where the bot is present:
 | Command | Description |
 |---------|-------------|
 | `!new <name>` | Create new session + channel |
-| `!continue [name]` | Continue existing session (name optional in session channel) |
-| `!kill [name]` | Kill a session (name optional in session channel) |
+| `!kill [name]` | Remove a session (name optional in session channel) |
+| `!reset` | Reset Claude's conversation memory (in session channel) |
 | `!list` | List active sessions |
-| `!output [lines]` | Capture Claude's screen (default: 100 lines) |
 | `!ping` | Check if bot is alive |
 | `!help` | Show all commands |
 | `!c <cmd>` | Run shell command on your machine |
