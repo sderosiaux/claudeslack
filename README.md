@@ -11,22 +11,30 @@
 flowchart LR
     subgraph phone[" "]
         A[📱 Slack]
+        C1[#project-a]
+        C2[#project-b]
     end
 
     subgraph pc["Your PC"]
         B[CCSA Listener]
         D[Claude Code CLI]
+        P1[~/projects/project-a]
+        P2[~/projects/project-b]
     end
 
-    A -->|"!new project"| B
-    A -->|"Fix the bug"| B
+    A --> C1 & C2
+    C1 & C2 -->|messages| B
     B -->|"claude -p --resume"| D
-    D -->|"JSON response"| B
-    B -->|"stream to thread"| A
+    D -->|runs in| P1 & P2
+    B -->|"response"| A
 
     style A fill:#4A154B,color:#fff
     style B fill:#2D333B,color:#fff
     style D fill:#D97706,color:#fff
+    style C1 fill:#4A154B,color:#fff
+    style C2 fill:#4A154B,color:#fff
+    style P1 fill:#1a1a2e,color:#fff
+    style P2 fill:#1a1a2e,color:#fff
 ```
 
 ## Why?
