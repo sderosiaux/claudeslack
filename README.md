@@ -1,11 +1,8 @@
 # Claude Code Slack Anywhere
 
-> Control [Claude Code](https://claude.ai/claude-code) remotely via Slack. Start sessions from your phone, interact with Claude, and receive notifications when tasks complete.
+> Control [Claude Code](https://docs.anthropic.com/en/docs/claude-code) from your phone. Each Slack channel = one project folder on your machine.
 
 ![CCSA Slack Interface](docs/slack-interface.png)
-
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ```mermaid
 flowchart LR
@@ -37,45 +34,37 @@ flowchart LR
     style P2 fill:#1a1a2e,color:#fff
 ```
 
-## Why?
+## How It Works
 
-Ever wanted to:
-- Start a Claude Code session from your phone while away from your computer?
-- Get notified when Claude finishes a long-running task?
-- Control Claude Code without being at your desk?
+```
+📱 Phone                              💻 Your PC
+────────────────────────────────────────────────────────────
 
-**Claude Code Slack Anywhere** bridges Claude Code with Slack, letting you control sessions from anywhere.
+#my-webapp channel                    ~/projects/my-webapp/
+├─ You: "Add dark mode toggle"
+│  └─ 👀 processing...               → Claude Code runs here
+│                                      → reads/writes files
+├─ Claude: "I'll add a theme          → full codebase access
+│  toggle to the header..."
+│  └─ ✅ done
+│
+├─ You: "Now add tests for it"        → same session continues
+│  └─ 👀                              → context preserved
+│
+└─ Claude: "Added 3 test cases..."
+   └─ ✅
+```
 
 ## Features
 
-- **100% Self-Hosted** - Runs entirely on your machine, no third-party servers
-- **Privacy First** - Your code and conversations never leave your computer
-- **Remote Control** - Start and manage Claude Code sessions entirely from Slack
-- **Session Continuity** - Uses Claude's `--resume` flag for persistent conversations
-- **Reaction Status** - Visual feedback: 👀 (processing) → ✅ (done)
-- **Multi-Session** - Run multiple concurrent sessions, each with its own Slack channel
-- **Interactive Buttons** - Answer Claude's questions with Block Kit buttons
-- **Auto-Session Detection** - Send a message in any channel matching a project folder → auto-starts
-- **Image Support** - Drop images in Slack to send them to Claude for analysis
-- **Markdown Conversion** - Claude's markdown renders properly in Slack (headers, bold, tables)
-
-## Demo Workflow
-
-```
-Slack (phone/desktop)
-─────────────────────────────────────
-1. !new todo-app
-   → Creates #todo-app channel + Claude session
-
-2. "Build a REST API with user auth"
-   → 👀 reaction appears on your message
-   → Claude's response streams to thread
-   → ✅ when done
-
-3. "Add unit tests"
-   → Claude continues in the same session
-   → Full context preserved
-```
+| Feature | Description |
+|---------|-------------|
+| **Multi-Project** | Each Slack channel maps to a project folder |
+| **Session Memory** | Conversations persist across messages |
+| **Visual Status** | 👀 processing → ✅ done (or ❌ error) |
+| **Images** | Drop screenshots in Slack for Claude to analyze |
+| **Interactive** | Answer Claude's questions via buttons |
+| **Self-Hosted** | Runs on your machine, your code never leaves |
 
 ## Requirements
 
