@@ -7,30 +7,6 @@ import (
 	"testing"
 )
 
-// TestSessionName tests the sessionName function
-func TestSessionName(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{"simple name", "myproject", "claude-myproject"},
-		{"with dash", "my-project", "claude-my-project"},
-		{"with slash", "money/shop", "claude-money/shop"},
-		{"empty", "", "claude-"},
-		{"with spaces", "my project", "claude-my project"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := sessionName(tt.input)
-			if result != tt.expected {
-				t.Errorf("sessionName(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 // TestGetSessionByChannel tests the getSessionByChannel function
 func TestGetSessionByChannel(t *testing.T) {
 	config := &Config{
@@ -97,7 +73,6 @@ func TestConfigSaveLoad(t *testing.T) {
 			"project1":   "C001",
 			"money/shop": "C002",
 		},
-		Away: true,
 	}
 
 	// Save config
@@ -126,9 +101,6 @@ func TestConfigSaveLoad(t *testing.T) {
 	}
 	if loaded.UserID != config.UserID {
 		t.Errorf("UserID = %q, want %q", loaded.UserID, config.UserID)
-	}
-	if loaded.Away != config.Away {
-		t.Errorf("Away = %v, want %v", loaded.Away, config.Away)
 	}
 	if len(loaded.Sessions) != len(config.Sessions) {
 		t.Errorf("Sessions length = %d, want %d", len(loaded.Sessions), len(config.Sessions))
@@ -296,7 +268,6 @@ func TestConfigJSON(t *testing.T) {
 		Sessions: map[string]string{
 			"test": "C001",
 		},
-		Away: true,
 	}
 
 	data, err := json.Marshal(config)
@@ -615,4 +586,278 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================
+// Tests for JSON mode Claude integration
+// ============================================
+
+// TestClaudeResponseParsing tests parsing of Claude JSON response
+func TestClaudeResponseParsing(t *testing.T) {
+	tests := []struct {
+		name        string
+		jsonInput   string
+		wantResult  string
+		wantSession string
+		wantInputT  int
+		wantOutputT int
+		wantError   bool
+	}{
+		{
+			name: "full response",
+			jsonInput: `{
+				"result": "Hello, I analyzed your code.",
+				"session_id": "abc-123-def-456",
+				"usage": {
+					"input_tokens": 1500,
+					"output_tokens": 500,
+					"cache_creation_input_tokens": 100,
+					"cache_read_input_tokens": 50
+				},
+				"duration_ms": 2500,
+				"is_error": false
+			}`,
+			wantResult:  "Hello, I analyzed your code.",
+			wantSession: "abc-123-def-456",
+			wantInputT:  1500,
+			wantOutputT: 500,
+			wantError:   false,
+		},
+		{
+			name: "minimal response",
+			jsonInput: `{
+				"result": "OK",
+				"session_id": "xyz-789"
+			}`,
+			wantResult:  "OK",
+			wantSession: "xyz-789",
+			wantInputT:  0,
+			wantOutputT: 0,
+			wantError:   false,
+		},
+		{
+			name: "error response",
+			jsonInput: `{
+				"result": "Error occurred",
+				"session_id": "err-session",
+				"is_error": true
+			}`,
+			wantResult:  "Error occurred",
+			wantSession: "err-session",
+			wantError:   false,
+		},
+		{
+			name:      "invalid json",
+			jsonInput: `{invalid json`,
+			wantError: true,
+		},
+		{
+			name:        "empty result",
+			jsonInput:   `{"result": "", "session_id": "empty-session"}`,
+			wantResult:  "",
+			wantSession: "empty-session",
+			wantError:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var resp ClaudeResponse
+			err := json.Unmarshal([]byte(tt.jsonInput), &resp)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if resp.Result != tt.wantResult {
+				t.Errorf("Result = %q, want %q", resp.Result, tt.wantResult)
+			}
+			if resp.SessionID != tt.wantSession {
+				t.Errorf("SessionID = %q, want %q", resp.SessionID, tt.wantSession)
+			}
+			if resp.Usage.InputTokens != tt.wantInputT {
+				t.Errorf("InputTokens = %d, want %d", resp.Usage.InputTokens, tt.wantInputT)
+			}
+			if resp.Usage.OutputTokens != tt.wantOutputT {
+				t.Errorf("OutputTokens = %d, want %d", resp.Usage.OutputTokens, tt.wantOutputT)
+			}
+		})
+	}
+}
+
+// TestSplitMessageIntoChunks tests the message splitting function
+func TestSplitMessageIntoChunks(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		maxLen     int
+		wantChunks int
+	}{
+		{
+			name:       "short message",
+			input:      "Hello world",
+			maxLen:     100,
+			wantChunks: 1,
+		},
+		{
+			name:       "exact limit",
+			input:      "Hello",
+			maxLen:     5,
+			wantChunks: 1,
+		},
+		{
+			name:       "needs split",
+			input:      "Hello world this is a test",
+			maxLen:     10,
+			wantChunks: 3,
+		},
+		{
+			name:       "split on newline",
+			input:      "Line one\nLine two\nLine three",
+			maxLen:     20,
+			wantChunks: 2,
+		},
+		{
+			name:       "empty string",
+			input:      "",
+			maxLen:     100,
+			wantChunks: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := splitMessageIntoChunks(tt.input, tt.maxLen)
+
+			if len(chunks) != tt.wantChunks {
+				t.Errorf("got %d chunks, want %d", len(chunks), tt.wantChunks)
+			}
+
+			// Verify all content is preserved
+			combined := ""
+			for _, chunk := range chunks {
+				combined += chunk
+			}
+			if combined != tt.input {
+				t.Errorf("content not preserved: got %q, want %q", combined, tt.input)
+			}
+
+			// Verify no chunk exceeds maxLen (except possibly the last one if it can't be split)
+			for i, chunk := range chunks {
+				if len(chunk) > tt.maxLen && i < len(chunks)-1 {
+					t.Errorf("chunk %d exceeds maxLen: %d > %d", i, len(chunk), tt.maxLen)
+				}
+			}
+		})
+	}
+}
+
+// TestClaudeSessionIDManagement tests session ID storage and retrieval
+func TestClaudeSessionIDManagement(t *testing.T) {
+	// Clean up before test
+	claudeSessionIDs.Range(func(key, value interface{}) bool {
+		claudeSessionIDs.Delete(key)
+		return true
+	})
+
+	channelID := "C-TEST-123"
+
+	// Test getting non-existent session
+	sid, ok := getClaudeSessionID(channelID)
+	if ok || sid != "" {
+		t.Errorf("expected no session, got %q, ok=%v", sid, ok)
+	}
+
+	// Store a session ID
+	testSessionID := "session-abc-123"
+	claudeSessionIDs.Store(channelID, testSessionID)
+
+	// Test getting existing session
+	sid, ok = getClaudeSessionID(channelID)
+	if !ok || sid != testSessionID {
+		t.Errorf("expected session %q, got %q, ok=%v", testSessionID, sid, ok)
+	}
+
+	// Test reset
+	resetClaudeSession(channelID)
+	sid, ok = getClaudeSessionID(channelID)
+	if ok || sid != "" {
+		t.Errorf("after reset: expected no session, got %q, ok=%v", sid, ok)
+	}
+}
+
+// TestClaudeSessionIDConcurrency tests concurrent access to session IDs
+func TestClaudeSessionIDConcurrency(t *testing.T) {
+	// Clean up
+	claudeSessionIDs.Range(func(key, value interface{}) bool {
+		claudeSessionIDs.Delete(key)
+		return true
+	})
+
+	// Concurrent writes
+	done := make(chan bool, 10)
+	for i := 0; i < 10; i++ {
+		go func(idx int) {
+			channelID := "C-CONCURRENT-" + string(rune('A'+idx))
+			sessionID := "session-" + string(rune('0'+idx))
+			claudeSessionIDs.Store(channelID, sessionID)
+
+			// Read back
+			if val, ok := claudeSessionIDs.Load(channelID); !ok || val != sessionID {
+				t.Errorf("concurrent access failed for %s", channelID)
+			}
+			done <- true
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+}
+
+// TestClaudeResponseWithLargeResult tests handling of large responses
+func TestClaudeResponseWithLargeResult(t *testing.T) {
+	// Generate a large result
+	largeResult := ""
+	for i := 0; i < 1000; i++ {
+		largeResult += "This is line " + string(rune('0'+i%10)) + " of the response.\n"
+	}
+
+	resp := ClaudeResponse{
+		Result:    largeResult,
+		SessionID: "large-response-session",
+		Usage: struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		}{
+			InputTokens:  10000,
+			OutputTokens: 5000,
+		},
+		DurationMs: 5000,
+	}
+
+	// Test that it can be serialized and deserialized
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var loaded ClaudeResponse
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if loaded.Result != largeResult {
+		t.Error("large result not preserved after marshal/unmarshal")
+	}
 }
