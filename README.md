@@ -154,11 +154,9 @@ Type these in any channel where the bot is present:
 | Input | Description |
 |-------|-------------|
 | Any message | Sent directly to Claude |
-| `//help` | Claude's `/help` command (use `//` because Slack intercepts `/`) |
-| `//compact` | Claude's `/compact` command |
-| `//clear` | Claude's `/clear` command |
-
-> **Note:** Use double-slash `//` for Claude slash commands. Single `/` is intercepted by Slack.
+| `!claude_compact` | Summarize conversation (reduce tokens) |
+| `!claude_clear` | Clear session and start fresh |
+| `!claude_help` | Show Claude-specific commands |
 
 ### Auto-Session Detection
 
@@ -166,7 +164,7 @@ No need to use `!new` if a project folder already exists. Just send a message in
 
 ```
 Slack channel: #my-cool-project
-Project folder: ~/Desktop/ai-projects/my-cool-project  (or "my cool project")
+Project folder: ~/code/ai-projects/my-cool-project  (or "my cool project")
 → Auto-detected! Session starts automatically.
 ```
 
