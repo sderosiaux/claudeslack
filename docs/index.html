@@ -1,344 +1,1618 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-US">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>claudeslack - Remote Claude Code Control</title>
-    <meta name="description" content="Control Claude Code from your phone. Start AI coding sessions remotely via Slack.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claudeslack | Remote AI Coding via Slack</title>
+  <meta name="description" content="Open-source Slack-to-Claude Code bridge. Map each Slack channel to a project folder. Code from your phone with voice input, file uploads, and real-time status.">
+  <link rel="canonical" href="https://github.com/sderosiaux/claudeslack">
+  <meta name="theme-color" content="#611f69">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="favicon.png">
+
+  <!-- Preload critical assets -->
+  <link rel="preload" href="hero-illustration.png" as="image">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="claudeslack">
+  <meta property="og:title" content="claudeslack | Remote AI Coding via Slack">
+  <meta property="og:description" content="Open-source Slack-to-Claude Code bridge. Map each Slack channel to a project folder. Code from your phone with voice input, file uploads, and real-time status.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/sderosiaux/claudeslack/main/website/og-card.png">
+  <meta property="og:url" content="https://github.com/sderosiaux/claudeslack">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="claudeslack | Remote AI Coding via Slack">
+  <meta name="twitter:description" content="Open-source Slack-to-Claude Code bridge. Map each Slack channel to a project folder. Code from your phone with voice input, file uploads, and real-time status.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/sderosiaux/claudeslack/main/website/og-card.png">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "claudeslack",
+    "url": "https://github.com/sderosiaux/claudeslack",
+    "description": "Open-source bridge between Slack and Claude Code CLI. Control Claude Code from your phone.",
+    "author": {
+      "@type": "Person",
+      "name": "sderosiaux",
+      "url": "https://github.com/sderosiaux"
+    }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ========================================
+       Design System - CSS Variables
+       ======================================== */
+    :root {
+      /* Colors - Slack-inspired purple + modern accents */
+      --color-primary: #611f69;
+      --color-primary-light: #7c3085;
+      --color-primary-dark: #4a154b;
+      --color-secondary: #1264a3;
+      --color-accent: #e01e5a;
+      --color-success: #2eb67d;
+      --color-warning: #ecb22e;
+      --color-error: #e01e5a;
+
+      /* Neutrals */
+      --color-white: #ffffff;
+      --color-gray-50: #f8f9fa;
+      --color-gray-100: #f1f3f5;
+      --color-gray-200: #e9ecef;
+      --color-gray-300: #dee2e6;
+      --color-gray-400: #ced4da;
+      --color-gray-500: #adb5bd;
+      --color-gray-600: #868e96;
+      --color-gray-700: #495057;
+      --color-gray-800: #343a40;
+      --color-gray-900: #212529;
+
+      /* Typography */
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-size-xs: 0.75rem;
+      --font-size-sm: 0.875rem;
+      --font-size-base: 1rem;
+      --font-size-lg: 1.125rem;
+      --font-size-xl: 1.25rem;
+      --font-size-2xl: 1.5rem;
+      --font-size-3xl: 1.875rem;
+      --font-size-4xl: 2.25rem;
+      --font-size-5xl: 3rem;
+      --font-size-6xl: 3.75rem;
+
+      /* Spacing (8px grid) */
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.25rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-10: 2.5rem;
+      --space-12: 3rem;
+      --space-16: 4rem;
+      --space-20: 5rem;
+      --space-24: 6rem;
+
+      /* Shadows */
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+      --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+      /* Border radius */
+      --radius-sm: 0.375rem;
+      --radius-md: 0.5rem;
+      --radius-lg: 0.75rem;
+      --radius-xl: 1rem;
+      --radius-2xl: 1.5rem;
+      --radius-full: 9999px;
+
+      /* Transitions */
+      --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+      --transition-base: 200ms cubic-bezier(0.16, 1, 0.3, 1);
+      --transition-slow: 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* ========================================
+       Base Styles
+       ======================================== */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font-family);
+      font-size: var(--font-size-base);
+      line-height: 1.6;
+      color: var(--color-gray-800);
+      background-color: var(--color-white);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      margin: 0;
+      font-weight: 600;
+      line-height: 1.2;
+      color: var(--color-gray-900);
+    }
+
+    h1 { font-size: var(--font-size-5xl); }
+    h2 { font-size: var(--font-size-3xl); }
+    h3 { font-size: var(--font-size-xl); }
+
+    p {
+      margin: 0;
+    }
+
+    a {
+      color: var(--color-primary);
+      text-decoration: none;
+      transition: color var(--transition-fast);
+    }
+
+    a:hover {
+      color: var(--color-primary-light);
+    }
+
+    img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    code {
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 0.9em;
+      background: var(--color-gray-100);
+      padding: 0.125em 0.375em;
+      border-radius: var(--radius-sm);
+    }
+
+    pre {
+      margin: 0;
+      padding: var(--space-4);
+      background: var(--color-gray-900);
+      color: var(--color-gray-100);
+      border-radius: var(--radius-lg);
+      overflow-x: auto;
+      font-size: var(--font-size-sm);
+    }
+
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* ========================================
+       Layout
+       ======================================== */
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 var(--space-6);
+    }
+
+    section {
+      padding: var(--space-20) 0;
+    }
+
+    /* ========================================
+       Components - Header
+       ======================================== */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid transparent;
+      transition: border-color var(--transition-base), box-shadow var(--transition-base);
+    }
+
+    .header.scrolled {
+      border-bottom-color: var(--color-gray-200);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      font-weight: 600;
+      font-size: var(--font-size-lg);
+      color: var(--color-gray-900);
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg {
+      width: 20px;
+      height: 20px;
+      color: white;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: var(--space-8);
+    }
+
+    .nav-link {
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      color: var(--color-gray-600);
+      transition: color var(--transition-fast);
+    }
+
+    .nav-link:hover {
+      color: var(--color-gray-900);
+    }
+
+    /* ========================================
+       Components - Buttons
+       ======================================== */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      font-family: var(--font-family);
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      line-height: 1;
+      border: none;
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      transition: all var(--transition-base);
+      text-decoration: none;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary {
+      background: var(--color-gray-900);
+      color: var(--color-white);
+      box-shadow: var(--shadow-md);
+    }
+
+    .btn-primary:hover {
+      background: var(--color-gray-800);
+      box-shadow: var(--shadow-lg);
+      color: var(--color-white);
+    }
+
+    .btn-secondary {
+      background: var(--color-white);
+      color: var(--color-gray-800);
+      border: 1px solid var(--color-gray-300);
+    }
+
+    .btn-secondary:hover {
+      background: var(--color-gray-50);
+      border-color: var(--color-gray-400);
+      color: var(--color-gray-900);
+    }
+
+    .btn-lg {
+      padding: var(--space-4) var(--space-8);
+      font-size: var(--font-size-base);
+      border-radius: var(--radius-xl);
+    }
+
+    .btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* ========================================
+       Components - Cards
+       ======================================== */
+    .card {
+      background: var(--color-white);
+      border: 1px solid var(--color-gray-200);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      transition: all var(--transition-base);
+    }
+
+    .card:hover {
+      border-color: var(--color-gray-300);
+      box-shadow: var(--shadow-lg);
+      transform: translateY(-2px);
+    }
+
+    .card-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--color-gray-100);
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: var(--space-4);
+    }
+
+    .card-icon svg {
+      width: 24px;
+      height: 24px;
+      color: var(--color-primary);
+    }
+
+    .card-title {
+      font-size: var(--font-size-lg);
+      font-weight: 600;
+      margin-bottom: var(--space-2);
+    }
+
+    .card-text {
+      color: var(--color-gray-600);
+      font-size: var(--font-size-sm);
+    }
+
+    /* ========================================
+       Components - Badges
+       ======================================== */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-1) var(--space-3);
+      font-size: var(--font-size-xs);
+      font-weight: 500;
+      border-radius: var(--radius-full);
+      background: var(--color-gray-100);
+      color: var(--color-gray-700);
+    }
+
+    .badge-primary {
+      background: rgba(97, 31, 105, 0.1);
+      color: var(--color-primary);
+    }
+
+    /* ========================================
+       Hero Section
+       ======================================== */
+    .hero {
+      padding-top: calc(64px + var(--space-16));
+      padding-bottom: var(--space-16);
+      text-align: center;
+      background: linear-gradient(180deg, var(--color-gray-50) 0%, var(--color-white) 100%);
+    }
+
+    .hero-badge {
+      margin-bottom: var(--space-6);
+    }
+
+    .hero h1 {
+      max-width: 800px;
+      margin: 0 auto var(--space-6);
+      font-size: clamp(var(--font-size-3xl), 5vw, var(--font-size-5xl));
+      letter-spacing: -0.02em;
+    }
+
+    .hero-subtitle {
+      max-width: 600px;
+      margin: 0 auto var(--space-8);
+      font-size: var(--font-size-lg);
+      color: var(--color-gray-600);
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-4);
+      flex-wrap: wrap;
+    }
+
+    .hero-visual {
+      margin-top: var(--space-16);
+      position: relative;
+    }
+
+    .hero-image {
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-xl);
+    }
+
+    /* ========================================
+       How It Works Section
+       ======================================== */
+    .how-it-works {
+      background: var(--color-white);
+    }
+
+    .section-header {
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto var(--space-12);
+    }
+
+    .section-header h2 {
+      margin-bottom: var(--space-4);
+    }
+
+    .section-header p {
+      color: var(--color-gray-600);
+      font-size: var(--font-size-lg);
+    }
+
+    .flow-visual {
+      text-align: center;
+    }
+
+    .flow-image {
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      border-radius: var(--radius-lg);
+    }
+
+    /* ========================================
+       Why Slack Section
+       ======================================== */
+    .why-slack {
+      background: var(--color-gray-50);
+    }
+
+    .benefits-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: var(--space-6);
+    }
+
+    .benefit-card {
+      background: var(--color-white);
+      border: 1px solid var(--color-gray-200);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      transition: all var(--transition-base);
+    }
+
+    .benefit-card:hover {
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-md);
+    }
+
+    .benefit-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: var(--space-4);
+    }
+
+    .benefit-icon svg {
+      width: 20px;
+      height: 20px;
+      color: white;
+    }
+
+    .benefit-title {
+      font-weight: 600;
+      margin-bottom: var(--space-2);
+    }
+
+    .benefit-text {
+      color: var(--color-gray-600);
+      font-size: var(--font-size-sm);
+    }
+
+    /* ========================================
+       Features Section
+       ======================================== */
+    .features {
+      background: var(--color-white);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: var(--space-6);
+    }
+
+    .feature-card {
+      text-align: center;
+      padding: var(--space-8);
+    }
+
+    .feature-icon {
+      width: 64px;
+      height: 64px;
+      background: var(--color-gray-100);
+      border-radius: var(--radius-xl);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-4);
+      transition: all var(--transition-base);
+    }
+
+    .feature-card:hover .feature-icon {
+      background: var(--color-primary);
+      transform: scale(1.1);
+    }
+
+    .feature-icon svg {
+      width: 28px;
+      height: 28px;
+      color: var(--color-primary);
+      transition: color var(--transition-base);
+    }
+
+    .feature-card:hover .feature-icon svg {
+      color: white;
+    }
+
+    .feature-title {
+      font-weight: 600;
+      margin-bottom: var(--space-2);
+    }
+
+    .feature-text {
+      color: var(--color-gray-600);
+      font-size: var(--font-size-sm);
+    }
+
+    /* ========================================
+       Quick Start Section
+       ======================================== */
+    .quickstart {
+      background: var(--color-gray-50);
+    }
+
+    .steps {
+      display: grid;
+      gap: var(--space-8);
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .step {
+      display: flex;
+      gap: var(--space-6);
+    }
+
+    .step-number {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      background: var(--color-primary);
+      color: white;
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+    }
+
+    .step-content {
+      flex: 1;
+    }
+
+    .step-title {
+      font-weight: 600;
+      margin-bottom: var(--space-2);
+    }
+
+    .step-text {
+      color: var(--color-gray-600);
+      font-size: var(--font-size-sm);
+      margin-bottom: var(--space-4);
+    }
+
+    .step pre {
+      margin-top: var(--space-3);
+    }
+
+    /* ========================================
+       Security Section
+       ======================================== */
+    .security {
+      background: var(--color-white);
+    }
+
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: var(--space-8);
+    }
+
+    .security-card {
+      padding: var(--space-6);
+      border-radius: var(--radius-xl);
+      background: var(--color-gray-50);
+    }
+
+    .security-card h3 {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+
+    .security-card h3 svg {
+      width: 20px;
+      height: 20px;
+      color: var(--color-success);
+    }
+
+    .security-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .security-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-3);
+      padding: var(--space-2) 0;
+      font-size: var(--font-size-sm);
+      color: var(--color-gray-700);
+    }
+
+    .security-list li svg {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      color: var(--color-success);
+      margin-top: 2px;
+    }
+
+    .security-grid-3 {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    @media (max-width: 900px) {
+      .security-grid-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .security-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .security-table tr {
+      border-bottom: 1px solid var(--color-gray-200);
+    }
+
+    .security-table tr:last-child {
+      border-bottom: none;
+    }
+
+    .security-table td {
+      padding: var(--space-2) var(--space-1);
+      font-size: var(--font-size-sm);
+      color: var(--color-gray-700);
+    }
+
+    .security-table td.label {
+      width: 24px;
+      text-align: center;
+    }
+
+    .security-table td.label svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .security-table td.label.good svg {
+      color: var(--color-success);
+    }
+
+    .security-table td.label.caution svg {
+      color: var(--color-gray-400);
+    }
+
+    /* Honest Data Flow */
+    .data-flow-honest {
+      background: var(--color-gray-50);
+      border: 1px solid var(--color-gray-200);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      margin-bottom: var(--space-8);
+    }
+
+    .data-flow-honest h3 {
+      font-size: var(--font-size-lg);
+      margin-bottom: var(--space-4);
+    }
+
+    .flow-table {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-4);
+      padding: var(--space-3);
+      background: var(--color-white);
+      border-radius: var(--radius-md);
+    }
+
+    @media (max-width: 600px) {
+      .flow-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+      }
+    }
+
+    .flow-what {
+      font-weight: 500;
+      font-size: var(--font-size-sm);
+      min-width: 180px;
+      color: var(--color-gray-700);
+    }
+
+    .flow-where {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+
+    .flow-tag {
+      display: inline-block;
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--radius-sm);
+      font-size: var(--font-size-xs);
+      font-weight: 500;
+    }
+
+    .flow-tag.slack {
+      background: #4a154b;
+      color: white;
+    }
+
+    .flow-tag.local {
+      background: var(--color-success);
+      color: white;
+    }
+
+    .flow-tag.anthropic {
+      background: #d97706;
+      color: white;
+    }
+
+    .flow-arrow {
+      color: var(--color-gray-400);
+      font-size: var(--font-size-sm);
+    }
+
+    .flow-note {
+      margin-top: var(--space-4);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--color-gray-200);
+      font-size: var(--font-size-sm);
+      color: var(--color-gray-600);
+    }
+
+    .security-card-warning {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+    }
+
+    .security-card-warning h3 svg {
+      color: #d97706;
+    }
+
+    .warning-list li svg {
+      color: #dc2626 !important;
+    }
+
+    /* Why Not SSH Section */
+    .why-not-ssh {
+      background: var(--color-gray-50);
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-6);
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 700px) {
+      .comparison-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .comparison-card {
+      background: var(--color-white);
+      border: 1px solid var(--color-gray-200);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+    }
+
+    .comparison-card h3 {
+      font-size: var(--font-size-base);
+      margin-bottom: var(--space-4);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .comparison-card h3 code {
+      font-size: var(--font-size-sm);
+    }
+
+    .comparison-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .comparison-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-2);
+      padding: var(--space-2) 0;
+      font-size: var(--font-size-sm);
+      color: var(--color-gray-700);
+    }
+
+    .comparison-list li svg {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      margin-top: 2px;
+    }
+
+    .comparison-list.pros li svg { color: var(--color-success); }
+    .comparison-list.cons li svg { color: var(--color-gray-400); }
+
+    .comparison-verdict {
+      text-align: center;
+      max-width: 600px;
+      margin: var(--space-8) auto 0;
+      color: var(--color-gray-600);
+      font-size: var(--font-size-sm);
+      line-height: 1.8;
+    }
+
+    /* ========================================
+       CTA Section
+       ======================================== */
+    .cta {
+      background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 100%);
+      color: white;
+      text-align: center;
+    }
+
+    .cta h2 {
+      color: white;
+      margin-bottom: var(--space-4);
+    }
+
+    .cta p {
+      opacity: 0.9;
+      margin-bottom: var(--space-8);
+      font-size: var(--font-size-lg);
+    }
+
+    .cta .btn-primary {
+      background: white;
+      color: var(--color-primary);
+    }
+
+    .cta .btn-primary:hover {
+      background: var(--color-gray-100);
+      color: var(--color-primary-dark);
+    }
+
+    /* ========================================
+       Footer
+       ======================================== */
+    .footer {
+      background: var(--color-gray-900);
+      color: var(--color-gray-400);
+      padding: var(--space-12) 0;
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: var(--space-4);
+    }
+
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      color: white;
+      font-weight: 600;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: var(--space-6);
+    }
+
+    .footer-links a {
+      color: var(--color-gray-400);
+      font-size: var(--font-size-sm);
+      transition: color var(--transition-fast);
+    }
+
+    .footer-links a:hover {
+      color: white;
+    }
+
+    /* ========================================
+       Animations
+       ======================================== */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .stagger-1 { transition-delay: 0.1s; }
+    .stagger-2 { transition-delay: 0.2s; }
+    .stagger-3 { transition-delay: 0.3s; }
+    .stagger-4 { transition-delay: 0.4s; }
+    .stagger-5 { transition-delay: 0.5s; }
+    .stagger-6 { transition-delay: 0.6s; }
+
+    /* Setup time badge */
+    .time-estimate {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      background: var(--color-gray-100);
+      border-radius: var(--radius-full);
+      font-size: var(--font-size-xs);
+      color: var(--color-gray-600);
+      margin-bottom: var(--space-3);
+    }
+
+    .time-estimate svg {
+      width: 14px;
+      height: 14px;
+    }
+  </style>
 </head>
 <body>
-    <!-- Ambient background -->
-    <div class="ambient-glow"></div>
-    <div class="grid-overlay"></div>
-
-    <!-- Navigation -->
-    <nav class="nav">
-        <div class="nav-brand">
-            <span class="logo">claudeslack</span>
-            <span class="logo-sub">Remote Claude Code Control</span>
-        </div>
-        <a href="https://github.com/sderosiaux/claudeslack" class="nav-github" target="_blank">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+  <!-- Header -->
+  <header class="header" id="header">
+    <div class="container">
+      <div class="header-inner">
+        <a href="#" class="logo">
+          <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          claudeslack
+        </a>
+        <nav class="nav">
+          <a href="#how-it-works" class="nav-link">How It Works</a>
+          <a href="#features" class="nav-link">Features</a>
+          <a href="#quickstart" class="nav-link">Quick Start</a>
+          <a href="https://github.com/sderosiaux/claudeslack" class="btn btn-primary" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
             </svg>
             GitHub
-        </a>
-    </nav>
+          </a>
+        </nav>
+      </div>
+    </div>
+  </header>
 
+  <main>
     <!-- Hero Section -->
     <section class="hero">
-        <div class="hero-content">
-            <div class="hero-badge">
-                <span class="badge-dot"></span>
-                Open Source & Self-Hosted
-            </div>
-            <h1 class="hero-title">
-                Code from your <span class="gradient-text">couch</span>
-            </h1>
-            <p class="hero-subtitle">
-                Control Claude Code remotely via Slack. Start coding sessions from your phone,
-                get notified when tasks complete, and seamlessly continue on your PC.
-            </p>
-            <div class="hero-cta">
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere" class="btn btn-primary">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    Get Started
-                </a>
-                <a href="#how-it-works" class="btn btn-secondary">See How It Works</a>
-            </div>
+      <div class="container">
+        <div class="hero-badge badge badge-primary fade-in">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          Open Source
         </div>
-
-        <!-- Interactive Demo -->
-        <div class="hero-demo">
-            <div class="demo-phone">
-                <div class="phone-notch"></div>
-                <div class="phone-screen">
-                    <div class="telegram-header">
-                        <div class="telegram-avatar">ccsa</div>
-                        <div class="telegram-info">
-                            <span class="telegram-name">#myproject</span>
-                            <span class="telegram-status">Slack</span>
-                        </div>
-                    </div>
-                    <div class="telegram-chat">
-                        <div class="msg msg-out">!new myproject</div>
-                        <div class="msg msg-in">
-                            <span class="msg-icon">:rocket:</span>
-                            Session 'myproject' started!
-                        </div>
-                        <div class="msg msg-out">Fix the auth bug in login.ts</div>
-                        <div class="msg msg-in typing">
-                            <span class="typing-dot"></span>
-                            <span class="typing-dot"></span>
-                            <span class="typing-dot"></span>
-                        </div>
-                        <div class="msg msg-in msg-delayed">
-                            <span class="msg-icon">:white_check_mark:</span>
-                            Fixed! Updated login.ts with proper token validation.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="demo-connection">
-                <div class="connection-line">
-                    <div class="connection-dot"></div>
-                    <div class="connection-dot"></div>
-                    <div class="connection-dot"></div>
-                </div>
-                <span class="connection-label">Socket Mode</span>
-            </div>
-
-            <div class="demo-terminal">
-                <div class="terminal-bar">
-                    <div class="terminal-dots">
-                        <span></span><span></span><span></span>
-                    </div>
-                    <span class="terminal-title">claude-myproject</span>
-                </div>
-                <div class="terminal-content">
-                    <div class="term-line"><span class="term-prompt">$</span> claude-code-slack-anywhere</div>
-                    <div class="term-line term-output">Attached to session: myproject</div>
-                    <div class="term-line term-output"></div>
-                    <div class="term-line term-claude">
-                        <span class="claude-badge">Claude</span>
-                        I found the authentication bug...
-                    </div>
-                    <div class="term-line term-cursor"></div>
-                </div>
-            </div>
+        <h1 class="fade-in stagger-1">Control Claude Code from Your Phone</h1>
+        <p class="hero-subtitle fade-in stagger-2">
+          Bridge Slack and Claude Code CLI. Each channel maps to a project folder on your machine. Code from anywhere.
+        </p>
+        <div class="hero-actions fade-in stagger-3">
+          <a href="https://github.com/sderosiaux/claudeslack" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+            View on GitHub
+          </a>
+          <a href="#quickstart" class="btn btn-secondary btn-lg">
+            Get Started
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </a>
         </div>
+        <div class="hero-visual fade-in stagger-4">
+          <img src="hero-illustration.png" alt="claudeslack connects your phone to Claude Code on your computer" class="hero-image">
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="how-it-works" id="how-it-works">
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>How It Works</h2>
+          <p>Send messages from Slack, Claude Code executes on your machine</p>
+        </div>
+        <div class="flow-visual fade-in stagger-1">
+          <img src="flow-diagram.png" alt="Phone with Slack sends messages through claudeslack bridge to Claude Code on your PC" class="flow-image">
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Slack Section -->
+    <section class="why-slack" id="why-slack">
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>Why Slack?</h2>
+          <p>Leverage a familiar interface with powerful capabilities</p>
+        </div>
+        <div class="benefits-grid">
+          <div class="benefit-card fade-in stagger-1">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+              </svg>
+            </div>
+            <h3 class="benefit-title">Works Offline</h3>
+            <p class="benefit-text">Queue messages while commuting. Responses arrive when you're back online. Async input AND output.</p>
+          </div>
+          <div class="benefit-card fade-in stagger-2">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </div>
+            <h3 class="benefit-title">Voice Input</h3>
+            <p class="benefit-text">Slack's built-in microphone means hands-free coding prompts. Dictate while walking.</p>
+          </div>
+          <div class="benefit-card fade-in stagger-3">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <h3 class="benefit-title">Threads = Sessions</h3>
+            <p class="benefit-text">Each thread is a task with full context continuity. New message = new task. Organized by default.</p>
+          </div>
+          <div class="benefit-card fade-in stagger-4">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </div>
+            <h3 class="benefit-title">Shareable</h3>
+            <p class="benefit-text">Invite teammates to project channels. Collaborate on tasks in real-time.</p>
+          </div>
+          <div class="benefit-card fade-in stagger-5">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+              </svg>
+            </div>
+            <h3 class="benefit-title">File Uploads</h3>
+            <p class="benefit-text">Drop images or code files. Saved to your project folder, analyzed by Claude instantly.</p>
+          </div>
+          <div class="benefit-card fade-in stagger-6">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              </svg>
+            </div>
+            <h3 class="benefit-title">Free Tier</h3>
+            <p class="benefit-text">Works with Slack's free plan. No additional costs beyond Claude Code subscription.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Not SSH Section -->
+    <section class="why-not-ssh" id="why-not-ssh">
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>Why Not Just SSH?</h2>
+          <p>Fair question. Here's the honest comparison.</p>
+        </div>
+        <div class="comparison-grid">
+          <div class="comparison-card fade-in stagger-1">
+            <h3><code>ssh + tmux + claude</code></h3>
+            <ul class="comparison-list pros">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                No extra dependencies
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Direct terminal access
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Full control over session
+              </li>
+            </ul>
+            <ul class="comparison-list cons">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Requires network/VPN to home
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Clunky on phone keyboards
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                No async - need connection
+              </li>
+            </ul>
+          </div>
+          <div class="comparison-card fade-in stagger-2">
+            <h3>claudeslack</h3>
+            <ul class="comparison-list pros">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Works offline (queue messages)
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Voice input via Slack
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Threads = persistent sessions
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Polished mobile UX (swipe channels/threads)
+              </li>
+            </ul>
+            <ul class="comparison-list cons">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Adds Slack as dependency
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Data through Slack servers
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Another daemon to maintain
+              </li>
+            </ul>
+          </div>
+        </div>
+        <p class="comparison-verdict fade-in stagger-3">
+          <strong>Use SSH</strong> if you have Tailscale/VPN and don't mind terminal on mobile.<br>
+          <strong>Use claudeslack</strong> if you want async messaging, voice input, or hate phone keyboards.
+        </p>
+      </div>
     </section>
 
     <!-- Features Section -->
     <section class="features" id="features">
-        <div class="section-header">
-            <h2>Everything you need to code remotely</h2>
-            <p>Built for developers who want AI assistance on their terms</p>
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>Features</h2>
+          <p>Everything you need for remote AI-assisted development</p>
         </div>
-
         <div class="features-grid">
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="5" y="2" width="14" height="20" rx="2"/>
-                        <line x1="12" y1="18" x2="12" y2="18.01" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </div>
-                <h3>Phone Control</h3>
-                <p>Start and manage Claude Code sessions directly from Slack. Perfect for when you're away from your desk.</p>
+          <div class="feature-card fade-in stagger-1">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
             </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                    </svg>
-                </div>
-                <h3>Smart Notifications</h3>
-                <p>Get pinged when Claude finishes a task. No more checking your terminal every 5 minutes.</p>
+            <h3 class="feature-title">Multi-Project</h3>
+            <p class="feature-text">Each Slack channel maps to a project folder. Switch contexts instantly.</p>
+          </div>
+          <div class="feature-card fade-in stagger-2">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v4"></path>
+                <path d="m16.24 7.76 2.83-2.83"></path>
+                <path d="M22 12h-4"></path>
+                <path d="m16.24 16.24 2.83 2.83"></path>
+                <path d="M12 22v-4"></path>
+                <path d="m4.93 19.07 2.83-2.83"></path>
+                <path d="M2 12h4"></path>
+                <path d="m4.93 4.93 2.83 2.83"></path>
+              </svg>
             </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                    </svg>
-                </div>
-                <h3>Multi-Session</h3>
-                <p>Run multiple projects simultaneously. Each session gets its own Slack channel for clean organization.</p>
+            <h3 class="feature-title">Session Memory</h3>
+            <p class="feature-text">Conversations persist across messages. Claude remembers context.</p>
+          </div>
+          <div class="feature-card fade-in stagger-3">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
             </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="3" y="11" width="18" height="11" rx="2"/>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                    </svg>
-                </div>
-                <h3>100% Self-Hosted</h3>
-                <p>Your code never leaves your machine. No cloud servers, no data collection, complete privacy.</p>
+            <h3 class="feature-title">Visual Status</h3>
+            <p class="feature-text">Real-time feedback with reactions. Know exactly what's happening.</p>
+          </div>
+          <div class="feature-card fade-in stagger-4">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
             </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <polyline points="4 17 10 11 4 5"/>
-                        <line x1="12" y1="19" x2="20" y2="19"/>
-                    </svg>
-                </div>
-                <h3>tmux Powered</h3>
-                <p>Sessions persist even if you disconnect. Attach from any terminal, anytime.</p>
+            <h3 class="feature-title">Image Analysis</h3>
+            <p class="feature-text">Drop screenshots for Claude to analyze. Debug errors visually.</p>
+          </div>
+          <div class="feature-card fade-in stagger-5">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
             </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                        <line x1="12" y1="17" x2="12.01" y2="17" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </div>
-                <h3>Interactive Buttons</h3>
-                <p>Approve Claude's plans with Slack Block Kit buttons. No need to type - just tap.</p>
-            </div>
+            <h3 class="feature-title">Interactive</h3>
+            <p class="feature-text">Answer Claude's questions via buttons. Approve changes with a tap.</p>
+          </div>
         </div>
+      </div>
     </section>
 
-    <!-- How It Works -->
-    <section class="how-it-works" id="how-it-works">
-        <div class="section-header">
-            <h2>Up and running in 3 steps</h2>
-            <p>No complicated setup. Just simple commands.</p>
+    <!-- Quick Start Section -->
+    <section class="quickstart" id="quickstart">
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>Quick Start</h2>
+          <p>Up and running in 3 steps</p>
+          <div class="time-estimate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            ~15 min first time, ~5 min if you've set up Slack apps before
+          </div>
         </div>
-
         <div class="steps">
-            <div class="step">
-                <div class="step-number">1</div>
-                <div class="step-content">
-                    <h3>Create a Slack App</h3>
-                    <p>Go to api.slack.com/apps and create your personal bot with Socket Mode enabled.</p>
-                    <div class="step-code">
-                        <code>Enable Socket Mode + Bot Scopes</code>
-                        <span class="code-comment">Get your xoxb- and xapp- tokens</span>
-                    </div>
-                </div>
+          <div class="step fade-in stagger-1">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3 class="step-title">Create a Slack App</h3>
+              <p class="step-text">Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> and create a new app with Socket Mode enabled. See the <a href="https://github.com/sderosiaux/claudeslack#quick-start" target="_blank" rel="noopener">setup guide</a> for required scopes.</p>
             </div>
-
-            <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-content">
-                    <h3>Run Setup</h3>
-                    <p>One command configures everything: Slack connection, Claude hook, and background service.</p>
-                    <div class="step-code">
-                        <code>claude-code-slack-anywhere setup xoxb-TOKEN xapp-TOKEN</code>
-                    </div>
-                </div>
+          </div>
+          <div class="step fade-in stagger-2">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3 class="step-title">Install & Configure</h3>
+              <p class="step-text">Clone the repo and run setup with your tokens.</p>
+              <pre><code>git clone https://github.com/sderosiaux/claudeslack.git
+cd claudeslack
+go build -o claudeslack .
+./claudeslack setup xoxb-YOUR-BOT-TOKEN xapp-YOUR-APP-TOKEN</code></pre>
             </div>
-
-            <div class="step">
-                <div class="step-number">3</div>
-                <div class="step-content">
-                    <h3>Start Coding</h3>
-                    <p>Navigate to any project and run the command. That's it. You're ready to code from anywhere.</p>
-                    <div class="step-code">
-                        <code>cd ~/myproject && claude-code-slack-anywhere</code>
-                    </div>
-                </div>
+          </div>
+          <div class="step fade-in stagger-3">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3 class="step-title">Start Listening</h3>
+              <p class="step-text">Run the listener and start coding from Slack!</p>
+              <pre><code>./claudeslack listen --projects-dir ~/code/projects</code></pre>
             </div>
+          </div>
         </div>
+      </div>
     </section>
 
-    <!-- Workflow Demo -->
-    <section class="workflow">
-        <div class="section-header">
-            <h2>See it in action</h2>
-            <p>Start on your phone, finish on your PC - or vice versa</p>
+    <!-- Security Section -->
+    <section class="security" id="security">
+      <div class="container">
+        <div class="section-header fade-in">
+          <h2>Security & Threat Model</h2>
+          <p>Be honest about what this is</p>
         </div>
 
-        <div class="workflow-visual">
-            <div class="workflow-step">
-                <div class="workflow-device phone">
-                    <div class="device-label">Slack</div>
-                    <div class="device-action">Start session with !new</div>
-                </div>
-                <div class="workflow-arrow">-></div>
+        <!-- Honest Data Flow -->
+        <div class="data-flow-honest fade-in stagger-1">
+          <h3>What Actually Happens to Your Data</h3>
+          <div class="flow-table">
+            <div class="flow-row">
+              <div class="flow-what">Your prompt</div>
+              <div class="flow-where">
+                <span class="flow-tag slack">Slack servers</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-tag local">Your machine</span>
+              </div>
             </div>
-
-            <div class="workflow-step">
-                <div class="workflow-device cloud">
-                    <div class="device-label">Your Mac</div>
-                    <div class="device-action">Claude works in tmux</div>
-                </div>
-                <div class="workflow-arrow">-></div>
+            <div class="flow-row">
+              <div class="flow-what">File contents Claude reads</div>
+              <div class="flow-where">
+                <span class="flow-tag local">Your machine</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-tag anthropic">Anthropic API</span>
+              </div>
             </div>
-
-            <div class="workflow-step">
-                <div class="workflow-device phone">
-                    <div class="device-label">Slack</div>
-                    <div class="device-action">Get notified when done</div>
-                </div>
-                <div class="workflow-arrow">-></div>
+            <div class="flow-row">
+              <div class="flow-what">Claude's response</div>
+              <div class="flow-where">
+                <span class="flow-tag anthropic">Anthropic API</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-tag local">Your machine</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-tag slack">Slack servers</span>
+              </div>
             </div>
-
-            <div class="workflow-step">
-                <div class="workflow-device terminal">
-                    <div class="device-label">Terminal</div>
-                    <div class="device-action">Attach & continue</div>
-                </div>
+            <div class="flow-row">
+              <div class="flow-what">File writes</div>
+              <div class="flow-where">
+                <span class="flow-tag local">Local only</span>
+              </div>
             </div>
+          </div>
+          <p class="flow-note"><strong>Translation:</strong> Your code <em>files</em> stay local, but their <em>contents</em> go to Anthropic when Claude reads them. Your prompts and responses are stored in Slack's infrastructure.</p>
         </div>
+
+        <div class="security-grid security-grid-3">
+          <div class="security-card fade-in stagger-2">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              Safeguards
+            </h3>
+            <ul class="security-list">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Allowlist of Slack user IDs
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Config file with 0600 permissions
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Socket Mode (no public webhook)
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Open source - audit the code
+              </li>
+            </ul>
+          </div>
+          <div class="security-card fade-in stagger-3">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+              What This Is
+            </h3>
+            <ul class="security-list">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                A weekend hack, not enterprise software
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Convenience tool for personal use
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Uses --dangerously-skip-permissions
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Single-user, single-machine design
+              </li>
+            </ul>
+          </div>
+          <div class="security-card security-card-warning fade-in stagger-4">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              Don't Use For
+            </h3>
+            <ul class="security-list warning-list">
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Production codebases
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Code under NDA
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Client work with confidentiality clauses
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Shared workspaces without consent
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- CTA Section -->
     <section class="cta">
-        <div class="cta-content">
-            <h2>Ready to code from anywhere?</h2>
-            <p>Join developers who've untethered themselves from their desks.</p>
-            <div class="cta-buttons">
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere" class="btn btn-primary btn-large">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                    </svg>
-                    View on GitHub
-                </a>
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere#quick-start" class="btn btn-secondary btn-large">
-                    Read the Docs
-                </a>
-            </div>
+      <div class="container">
+        <h2 class="fade-in">Ready to Code from Anywhere?</h2>
+        <p class="fade-in stagger-1">Join developers who've freed themselves from their desks.</p>
+        <div class="fade-in stagger-2">
+          <a href="https://github.com/sderosiaux/claudeslack" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+            Star on GitHub
+          </a>
         </div>
-        <div class="cta-decoration">
-            <div class="decoration-circle"></div>
-            <div class="decoration-circle"></div>
-            <div class="decoration-circle"></div>
-        </div>
+      </div>
     </section>
+  </main>
 
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-brand">
-                <span class="logo">ccsa</span>
-                <p>Made with Claude Code</p>
-            </div>
-            <div class="footer-links">
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere">GitHub</a>
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere/issues">Issues</a>
-                <a href="https://github.com/sderosiaux/claude-code-slack-anywhere/blob/main/LICENSE">MIT License</a>
-            </div>
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-logo">
+          <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          claudeslack
         </div>
-    </footer>
+        <div class="footer-links">
+          <a href="https://github.com/sderosiaux/claudeslack" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/sderosiaux/claudeslack/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+          <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code Docs</a>
+        </div>
+      </div>
+    </div>
+  </footer>
 
-    <script>
-        // Animate elements on scroll
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.1 });
+  <!-- JavaScript for animations and interactions -->
+  <script>
+    // Header scroll effect
+    const header = document.getElementById('header');
+    window.addEventListener('scroll', () => {
+      if (window.scrollY > 10) {
+        header.classList.add('scrolled');
+      } else {
+        header.classList.remove('scrolled');
+      }
+    });
 
-        document.querySelectorAll('.feature-card, .step, .workflow-step').forEach(el => {
-            observer.observe(el);
-        });
+    // Intersection Observer for fade-in animations
+    const observerOptions = {
+      root: null,
+      rootMargin: '0px',
+      threshold: 0.1
+    };
 
-        // Typing animation for terminal
-        setTimeout(() => {
-            document.querySelector('.msg-delayed')?.classList.add('show');
-        }, 3000);
-    </script>
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.fade-in').forEach(el => {
+      observer.observe(el);
+    });
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+  </script>
 </body>
 </html>

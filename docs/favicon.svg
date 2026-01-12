@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background circle with gradient -->
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#611f69"/>
+      <stop offset="100%" style="stop-color:#1264a3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="32" height="32" rx="8" fill="url(#bg-gradient)"/>
+
+  <!-- Chat bubble icon -->
+  <path d="M24 17a2 2 0 0 1-2 2H11l-3 3V9a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8z"
+        stroke="white"
+        stroke-width="1.5"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Code brackets inside bubble -->
+  <path d="M13 11l-2 3 2 3"
+        stroke="white"
+        stroke-width="1.5"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <path d="M19 11l2 3-2 3"
+        stroke="white"
+        stroke-width="1.5"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
