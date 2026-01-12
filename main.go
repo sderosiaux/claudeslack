@@ -68,7 +68,7 @@ type listenOpts struct {
 // Main listen loop using Socket Mode
 func listen(opts listenOpts) error {
 	myPid := os.Getpid()
-	logf("Starting (PID %d)", myPid)
+	logf("Starting v%s (build: %s) PID %d", version, buildTime, myPid)
 
 	cmd := exec.Command("pgrep", "-f", "claude-code-slack-anywhere listen")
 	output, _ := cmd.Output()

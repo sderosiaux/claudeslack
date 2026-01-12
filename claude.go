@@ -708,12 +708,18 @@ func (m *SlackThreadManager) PostFinalResult(resp *ClaudeResponse) {
 		warningMsg = "\n:bulb: _Context: " + fmt.Sprintf("%dk", totalTokens/1000) + " tokens_"
 	}
 
-	// Post stats
-	statsMsg := fmt.Sprintf(":checkered_flag: *Done* | %d turns | %d in / %d out tokens | %dms%s",
+	// Post stats - format duration as seconds or minutes
+	var durationStr string
+	if resp.DurationMs >= 60000 {
+		durationStr = fmt.Sprintf("%.1fmin", float64(resp.DurationMs)/60000)
+	} else {
+		durationStr = fmt.Sprintf("%.1fs", float64(resp.DurationMs)/1000)
+	}
+	statsMsg := fmt.Sprintf(":checkered_flag: *Done* | %d turns | %d tokens in | %d tokens out | %s%s",
 		resp.NumTurns,
 		resp.Usage.InputTokens,
 		resp.Usage.OutputTokens,
-		resp.DurationMs,
+		durationStr,
 		warningMsg)
 
 	sendMessageToThread(m.config, m.channelID, m.threadTS, statsMsg)
@@ -735,7 +741,7 @@ func (m *SlackThreadManager) PostError(errMsg string) {
 func getToolEmoji(toolName string) string {
 	switch strings.ToLower(toolName) {
 	case "bash", "execute", "command", "bashoutput":
-		return ":computer:"
+		return "" // No emoji for bash - command itself is self-explanatory
 	case "read", "readfile":
 		return ":page_facing_up:"
 	case "write", "writefile", "edit":
@@ -749,13 +755,13 @@ func getToolEmoji(toolName string) string {
 	case "webfetch", "webrequest":
 		return ":globe_with_meridians:"
 	case "todowrite":
-		return ":clipboard:"
+		return "" // No emoji - formatted list is self-explanatory
 	case "askuserquestion":
 		return ":question:"
 	case "websearch":
 		return ":mag:"
 	default:
-		return ":wrench:"
+		return ""
 	}
 }
 
@@ -766,7 +772,14 @@ func formatToolInput(toolName string, input json.RawMessage) string {
 		return ""
 	}
 
-	switch strings.ToLower(toolName) {
+	toolLower := strings.ToLower(toolName)
+
+	// Handle TodoWrite specially - check if data has "todos" key regardless of tool name
+	if _, hasTodos := data["todos"]; hasTodos {
+		toolLower = "todowrite"
+	}
+
+	switch toolLower {
 	case "bash", "execute":
 		if cmd, ok := data["command"].(string); ok {
 			if len(cmd) > 200 {
@@ -811,35 +824,74 @@ func formatToolInput(toolName string, input json.RawMessage) string {
 			return fmt.Sprintf("_%s_", query)
 		}
 	case "todowrite":
-		if todos, ok := data["todos"].([]interface{}); ok {
+		if todos, ok := data["todos"].([]interface{}); ok && len(todos) > 0 {
 			var items []string
 			for _, t := range todos {
 				if todo, ok := t.(map[string]interface{}); ok {
 					content, _ := todo["content"].(string)
 					status, _ := todo["status"].(string)
-					emoji := ":white_circle:"
+					activeForm, _ := todo["activeForm"].(string)
+					// Use activeForm if in_progress, otherwise content
+					displayText := content
+					if status == "in_progress" && activeForm != "" {
+						displayText = activeForm
+					}
+					emoji := "☐"
 					switch status {
 					case "completed":
-						emoji = ":white_check_mark:"
+						emoji = "☑"
 					case "in_progress":
-						emoji = ":arrow_forward:"
+						emoji = "▶"
 					}
-					items = append(items, fmt.Sprintf("%s %s", emoji, content))
+					items = append(items, fmt.Sprintf("%s %s", emoji, displayText))
 				}
 			}
 			if len(items) > 0 {
 				return strings.Join(items, "\n")
 			}
 		}
+		return "_updating tasks_"
 	}
 
-	// Default: show truncated JSON
-	raw, _ := json.Marshal(data)
-	s := string(raw)
-	if len(s) > 100 {
-		s = s[:100] + "..."
+	// MCP tools - check by data shape rather than tool name
+	// mcp__context7__resolve-library-id
+	if libraryName, ok := data["libraryName"].(string); ok {
+		if query, ok := data["query"].(string); ok {
+			return fmt.Sprintf(":books: `%s` _%s_", libraryName, query)
+		}
+		return fmt.Sprintf(":books: `%s`", libraryName)
 	}
-	return fmt.Sprintf("`%s`", s)
+	// mcp__context7__query-docs
+	if libraryId, ok := data["libraryId"].(string); ok {
+		if query, ok := data["query"].(string); ok {
+			return fmt.Sprintf(":book: `%s` _%s_", libraryId, query)
+		}
+		return fmt.Sprintf(":book: `%s`", libraryId)
+	}
+
+	// Default: show tool name and human-readable params
+	var parts []string
+	parts = append(parts, fmt.Sprintf("*%s*", toolName))
+	for key, val := range data {
+		switch v := val.(type) {
+		case string:
+			if len(v) > 100 {
+				v = v[:100] + "..."
+			}
+			parts = append(parts, fmt.Sprintf("• %s: `%s`", key, v))
+		case bool:
+			parts = append(parts, fmt.Sprintf("• %s: %v", key, v))
+		case float64:
+			parts = append(parts, fmt.Sprintf("• %s: %v", key, v))
+		case []interface{}:
+			parts = append(parts, fmt.Sprintf("• %s: (%d items)", key, len(v)))
+		case map[string]interface{}:
+			parts = append(parts, fmt.Sprintf("• %s: {%d keys}", key, len(v)))
+		default:
+			parts = append(parts, fmt.Sprintf("• %s: %v", key, v))
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // Main streaming function
