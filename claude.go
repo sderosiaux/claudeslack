@@ -224,6 +224,9 @@ func init() {
 
 	// Load persisted sessions
 	loadSessionsFromDisk()
+
+	// Load persisted pinned channels
+	loadPinnedChannelsFromDisk()
 }
 
 func runClaudeRaw(continueSession bool) error {

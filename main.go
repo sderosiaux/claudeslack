@@ -429,6 +429,9 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		baseDir := getProjectsDir(config)
 		workDir := filepath.Join(baseDir, sessionName)
 
+		// Auto-pin GitHub repo if exists
+		go PinGitHubRepoIfExists(config, channelID, workDir)
+
 		addReaction(config, channelID, event.TS, "eyes")
 		prompt := slackUserPrefix + taskPrompt
 
@@ -709,6 +712,9 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 
 		logf("Session created: %s (dir: %s)", arg, workDir)
 		sendMessage(config, targetChannelID, fmt.Sprintf(":rocket: Session '%s' ready!\n\nSend messages here to interact with Claude.", arg))
+
+		// Auto-pin GitHub repo if exists
+		go PinGitHubRepoIfExists(config, targetChannelID, workDir)
 		return
 	}
 
@@ -891,6 +897,9 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 			if err := cfgMgr.SetSession(sessionName, channelID); err != nil {
 				logf("Failed to auto-save session: %v", err)
 			}
+
+			// Auto-pin GitHub repo if exists
+			go PinGitHubRepoIfExists(config, channelID, projectDir)
 
 			// Handle as session message using streaming mode
 			addReaction(config, channelID, event.TS, "eyes")

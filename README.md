@@ -93,6 +93,7 @@ flowchart LR
 | **Scheduled Tasks** | Run tasks later with `!at 5m run tests` |
 | **Auto-Compact** | Automatically compacts context when too long |
 | **Quiet Mode** | Hide read operations with `!quiet` |
+| **GitHub Auto-Pin** | Automatically pins GitHub repo link in channel |
 
 ## Requirements
 
@@ -119,7 +120,7 @@ Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** �
 | Setting | Location | Value |
 |---------|----------|-------|
 | Socket Mode | Socket Mode | **ON** + create token with `connections:write` → save `xapp-...` |
-| Bot Scopes | OAuth & Permissions | `channels:manage`, `channels:history`, `channels:read`, `chat:write`, `files:read`, `reactions:write`, `users:read` |
+| Bot Scopes | OAuth & Permissions | `channels:manage`, `channels:history`, `channels:read`, `chat:write`, `files:read`, `pins:read`, `pins:write`, `reactions:write`, `users:read` |
 | Events | Event Subscriptions | **ON** + add `message.channels` |
 | Interactivity | Interactivity & Shortcuts | **ON** |
 | Install | Install App | Click install → copy `xoxb-...` token |

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -628,4 +629,209 @@ func archiveChannel(config *Config, channelID string) error {
 		return fmt.Errorf("failed to archive channel: %s", result.Error)
 	}
 	return nil
+}
+
+// pinMessage pins a message in a channel
+func pinMessage(config *Config, channelID string, messageTS string) error {
+	params := url.Values{
+		"channel":   {channelID},
+		"timestamp": {messageTS},
+	}
+
+	result, err := slackAPI(config, "pins.add", params)
+	if err != nil {
+		return err
+	}
+	if !result.OK {
+		// Ignore "already_pinned" error
+		if result.Error != "already_pinned" {
+			return fmt.Errorf("failed to pin message: %s", result.Error)
+		}
+	}
+	return nil
+}
+
+// getGitHubURL extracts the GitHub URL from a git repository
+func getGitHubURL(projectDir string) string {
+	gitConfigPath := filepath.Join(projectDir, ".git", "config")
+	data, err := os.ReadFile(gitConfigPath)
+	if err != nil {
+		return ""
+	}
+
+	content := string(data)
+
+	// Look for remote "origin" URL
+	// Format: [remote "origin"]
+	//         url = git@github.com:user/repo.git
+	// or:     url = https://github.com/user/repo.git
+
+	lines := strings.Split(content, "\n")
+	inOrigin := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == `[remote "origin"]` {
+			inOrigin = true
+			continue
+		}
+		if inOrigin && strings.HasPrefix(line, "[") {
+			break // next section
+		}
+		if inOrigin && strings.HasPrefix(line, "url = ") {
+			url := strings.TrimPrefix(line, "url = ")
+			return convertToGitHubHTTPS(url)
+		}
+	}
+	return ""
+}
+
+// convertToGitHubHTTPS converts various git URL formats to HTTPS
+func convertToGitHubHTTPS(gitURL string) string {
+	gitURL = strings.TrimSpace(gitURL)
+
+	// Already HTTPS
+	if strings.HasPrefix(gitURL, "https://github.com/") {
+		return strings.TrimSuffix(gitURL, ".git")
+	}
+
+	// SSH format: git@github.com:user/repo.git
+	if strings.HasPrefix(gitURL, "git@github.com:") {
+		path := strings.TrimPrefix(gitURL, "git@github.com:")
+		path = strings.TrimSuffix(path, ".git")
+		return "https://github.com/" + path
+	}
+
+	// Other GitHub URLs
+	if strings.Contains(gitURL, "github.com") {
+		return strings.TrimSuffix(gitURL, ".git")
+	}
+
+	return ""
+}
+
+// Track which channels already have GitHub pinned
+var pinnedGitHubChannels sync.Map // channelID -> bool
+
+// getPinnedChannelsFilePath returns the path to the pinned channels file
+func getPinnedChannelsFilePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ccsa", "pinned-channels.json")
+}
+
+// loadPinnedChannelsFromDisk loads persisted pinned channels from disk
+func loadPinnedChannelsFromDisk() {
+	filePath := getPinnedChannelsFilePath()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return // File doesn't exist yet
+	}
+	var channels []string
+	if err := json.Unmarshal(data, &channels); err != nil {
+		return
+	}
+	for _, ch := range channels {
+		pinnedGitHubChannels.Store(ch, true)
+	}
+}
+
+// savePinnedChannelsToDisk persists pinned channels to disk
+func savePinnedChannelsToDisk() {
+	filePath := getPinnedChannelsFilePath()
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return
+	}
+	var channels []string
+	pinnedGitHubChannels.Range(func(key, value interface{}) bool {
+		channels = append(channels, key.(string))
+		return true
+	})
+	data, _ := json.Marshal(channels)
+	os.WriteFile(filePath, data, 0600)
+}
+
+// hasGitHubPinned checks if the channel already has a GitHub link pinned
+func hasGitHubPinned(config *Config, channelID string) bool {
+	apiURL := "https://slack.com/api/pins.list"
+	params := url.Values{
+		"channel": {channelID},
+	}
+
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(params.Encode()))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer "+config.BotToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	// Parse the raw JSON to check for GitHub links
+	var result struct {
+		OK    bool `json:"ok"`
+		Items []struct {
+			Message struct {
+				Text string `json:"text"`
+			} `json:"message"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false
+	}
+
+	if !result.OK {
+		return false
+	}
+
+	for _, item := range result.Items {
+		if strings.Contains(item.Message.Text, "github.com") {
+			return true
+		}
+	}
+	return false
+}
+
+// PinGitHubRepoIfExists checks if project has a GitHub remote and pins it to the channel
+func PinGitHubRepoIfExists(config *Config, channelID string, projectDir string) {
+	// Check if already pinned (in-memory cache)
+	if _, ok := pinnedGitHubChannels.Load(channelID); ok {
+		return
+	}
+
+	githubURL := getGitHubURL(projectDir)
+	if githubURL == "" {
+		return
+	}
+
+	// Check if already pinned in Slack (survives restarts)
+	if hasGitHubPinned(config, channelID) {
+		pinnedGitHubChannels.Store(channelID, true)
+		logf("GitHub already pinned in channel %s, skipping", channelID)
+		return
+	}
+
+	// Send message with GitHub link
+	msg := fmt.Sprintf(":octocat: *GitHub:* <%s>", githubURL)
+	ts, err := sendMessage(config, channelID, msg)
+	if err != nil {
+		logf("Failed to send GitHub message: %v", err)
+		return
+	}
+
+	// Pin the message
+	if err := pinMessage(config, channelID, ts); err != nil {
+		logf("Failed to pin GitHub message: %v", err)
+		return
+	}
+
+	// Mark as pinned and persist
+	pinnedGitHubChannels.Store(channelID, true)
+	savePinnedChannelsToDisk()
+	logf("Pinned GitHub repo %s in channel %s", githubURL, channelID)
 }
