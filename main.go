@@ -28,14 +28,19 @@ const slackUserPrefix = "[REMOTE via Slack - I cannot see your screen or open fi
 
 // System prompt additions via --append-system-prompt
 const SlackSystemPromptAppend = `
-IMPORTANT - Background processes:
-- This is a non-interactive session. When you exit, ALL background processes you started will be killed.
-- NEVER use & or nohup for long-running processes - they will die immediately.
-- For servers/daemons, use process managers that persist: pm2, screen, tmux, or systemd.
-- Examples:
-  - pm2 start server.js --name myserver
-  - screen -dmS myserver node server.js
-  - tmux new-session -d -s myserver 'node server.js'
+CRITICAL - Process execution rules:
+1. NEVER run blocking/long-running processes directly (servers, watchers, tails, etc.)
+   - Running "node server.js" or "npm start" will BLOCK the entire session
+   - The user will be unable to send more messages until timeout (10 min)
+
+2. ALWAYS use process managers for servers/daemons:
+   - pm2 start server.js --name myserver
+   - screen -dmS myserver node server.js
+   - tmux new-session -d -s myserver 'node server.js'
+
+3. Background processes with & or nohup will be KILLED when session ends
+
+4. To check if a server is running: pm2 list, screen -ls, or curl the endpoint
 `
 
 // Global config manager, worker pool and message queue
