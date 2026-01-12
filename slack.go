@@ -32,6 +32,12 @@ type SlackResponse struct {
 	Channel json.RawMessage `json:"channel,omitempty"`
 	TS      string          `json:"ts,omitempty"`
 	URL     string          `json:"url,omitempty"` // For Socket Mode connection
+	File    *SlackFileInfo  `json:"file,omitempty"`
+}
+
+type SlackFileInfo struct {
+	ID        string `json:"id"`
+	Permalink string `json:"permalink"`
 }
 
 type SlackChannel struct {
@@ -173,9 +179,9 @@ func slackAPIJSON(config *Config, method string, payload interface{}) (*SlackRes
 	return &result, nil
 }
 
-// downloadSlackFile downloads a file from Slack to a temp directory
+// downloadSlackFileToDir downloads a file from Slack to a specified directory
 // Returns the local file path or error
-func downloadSlackFile(config *Config, file SlackFile) (string, error) {
+func downloadSlackFileToDir(config *Config, file SlackFile, targetDir string) (string, error) {
 	// Use url_private_download if available, otherwise url_private
 	downloadURL := file.URLPrivateDownload
 	if downloadURL == "" {
@@ -201,30 +207,22 @@ func downloadSlackFile(config *Config, file SlackFile) (string, error) {
 		return "", fmt.Errorf("failed to download file: HTTP %d", resp.StatusCode)
 	}
 
-	// Create temp directory for images if it doesn't exist
-	tempDir := filepath.Join(os.TempDir(), "ccsa-images")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return "", err
+	// Use original filename (sanitized)
+	filename := file.Name
+	// Remove any path separators from filename for safety
+	filename = filepath.Base(filename)
+	if filename == "" || filename == "." {
+		filename = file.ID
 	}
 
-	// Create unique filename with original extension
-	ext := filepath.Ext(file.Name)
-	if ext == "" {
-		// Infer from mimetype
-		switch file.Mimetype {
-		case "image/png":
-			ext = ".png"
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		default:
-			ext = ".bin"
-		}
+	localPath := filepath.Join(targetDir, filename)
+
+	// If file already exists, add timestamp
+	if _, err := os.Stat(localPath); err == nil {
+		ext := filepath.Ext(filename)
+		base := strings.TrimSuffix(filename, ext)
+		localPath = filepath.Join(targetDir, fmt.Sprintf("%s-%d%s", base, time.Now().Unix(), ext))
 	}
-	localPath := filepath.Join(tempDir, fmt.Sprintf("%s-%d%s", file.ID, time.Now().UnixNano(), ext))
 
 	outFile, err := os.Create(localPath)
 	if err != nil {
@@ -246,24 +244,52 @@ func isImageFile(file SlackFile) bool {
 	return strings.HasPrefix(file.Mimetype, "image/")
 }
 
-// cleanupTempImages removes old temp images (older than 1 hour)
-func cleanupTempImages() {
-	tempDir := filepath.Join(os.TempDir(), "ccsa-images")
-	entries, err := os.ReadDir(tempDir)
-	if err != nil {
-		return
+// isTextFile checks if a Slack file is a text/code file that Claude can read
+func isTextFile(file SlackFile) bool {
+	// Check by mimetype
+	textMimes := []string{
+		"text/",
+		"application/json",
+		"application/xml",
+		"application/javascript",
+		"application/typescript",
+		"application/x-yaml",
+		"application/x-sh",
+		"application/sql",
 	}
-
-	cutoff := time.Now().Add(-1 * time.Hour)
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(tempDir, entry.Name()))
+	for _, prefix := range textMimes {
+		if strings.HasPrefix(file.Mimetype, prefix) {
+			return true
 		}
 	}
+	// Check by extension
+	textExts := []string{
+		".go", ".py", ".js", ".ts", ".tsx", ".jsx",
+		".json", ".yaml", ".yml", ".toml", ".xml",
+		".md", ".txt", ".log", ".csv",
+		".html", ".css", ".scss", ".less",
+		".sh", ".bash", ".zsh", ".fish",
+		".sql", ".graphql", ".proto",
+		".rs", ".rb", ".php", ".java", ".kt", ".swift",
+		".c", ".cpp", ".h", ".hpp",
+		".env", ".gitignore", ".dockerignore",
+		".dockerfile", ".makefile",
+	}
+	ext := strings.ToLower(filepath.Ext(file.Name))
+	for _, e := range textExts {
+		if ext == e {
+			return true
+		}
+	}
+	// Also check common filenames without extensions
+	lowerName := strings.ToLower(file.Name)
+	specialFiles := []string{"dockerfile", "makefile", "gemfile", "rakefile", "procfile"}
+	for _, f := range specialFiles {
+		if lowerName == f {
+			return true
+		}
+	}
+	return false
 }
 
 func sendMessage(config *Config, channelID string, text string) (string, error) {
@@ -417,6 +443,48 @@ func updateMessage(config *Config, channelID string, ts string, text string) err
 		return fmt.Errorf("slack error: %s", result.Error)
 	}
 	return nil
+}
+
+func deleteMessage(config *Config, channelID string, ts string) error {
+	payload := map[string]interface{}{
+		"channel": channelID,
+		"ts":      ts,
+	}
+
+	result, err := slackAPIJSON(config, "chat.delete", payload)
+	if err != nil {
+		return err
+	}
+	if !result.OK {
+		// Ignore "message_not_found" - already deleted
+		if result.Error != "message_not_found" {
+			return fmt.Errorf("slack error: %s", result.Error)
+		}
+	}
+	return nil
+}
+
+// uploadSnippet uploads content as a Slack snippet and returns the file URL
+func uploadSnippet(config *Config, channelID, threadTS, filename, content, title string) (string, error) {
+	// Use files.upload API (v1)
+	params := url.Values{
+		"channels":        {channelID},
+		"thread_ts":       {threadTS},
+		"content":         {content},
+		"filename":        {filename},
+		"title":           {title},
+		"filetype":        {"text"},
+		"initial_comment": {"Full output:"},
+	}
+
+	result, err := slackAPI(config, "files.upload", params)
+	if err != nil {
+		return "", err
+	}
+	if !result.OK {
+		return "", fmt.Errorf("failed to upload snippet: %s", result.Error)
+	}
+	return result.File.Permalink, nil
 }
 
 func splitMessage(text string, maxLen int) []string {

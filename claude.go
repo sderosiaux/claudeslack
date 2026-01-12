@@ -109,10 +109,15 @@ type ClaudeUsage struct {
 // claudeSessionIDs stores Claude session IDs by Slack channel ID
 var claudeSessionIDs sync.Map // channelID (string) -> sessionID (string)
 
-const sessionFilePath = "/tmp/claude-slack-sessions.json"
+// getSessionFilePath returns the path to the sessions file (~/.ccsa/sessions.json)
+func getSessionFilePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ccsa", "sessions.json")
+}
 
 // loadSessionsFromDisk loads persisted sessions from disk
 func loadSessionsFromDisk() {
+	sessionFilePath := getSessionFilePath()
 	data, err := os.ReadFile(sessionFilePath)
 	if err != nil {
 		return // File doesn't exist yet, that's fine
@@ -128,6 +133,12 @@ func loadSessionsFromDisk() {
 
 // saveSessionsToDisk persists sessions to disk
 func saveSessionsToDisk() {
+	sessionFilePath := getSessionFilePath()
+	// Ensure directory exists
+	dir := filepath.Dir(sessionFilePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return
+	}
 	sessions := make(map[string]string)
 	claudeSessionIDs.Range(func(key, value interface{}) bool {
 		sessions[key.(string)] = value.(string)
@@ -330,17 +341,98 @@ type SlackThreadManager struct {
 	// Track if system init was already posted
 	systemInitPosted bool
 
+	// Heartbeat timer for long operations
+	heartbeatTicker  *time.Ticker
+	heartbeatStop    chan struct{}
+	heartbeatTS      string // Message TS for the heartbeat message
+	lastActivityTime time.Time
+
 	mu sync.Mutex
 }
 
 // NewSlackThreadManager creates a new thread manager
 func NewSlackThreadManager(config *Config, channelID, threadTS string) *SlackThreadManager {
-	return &SlackThreadManager{
-		config:      config,
-		channelID:   channelID,
-		threadTS:    threadTS,
-		activeTools: make(map[string]string),
+	m := &SlackThreadManager{
+		config:           config,
+		channelID:        channelID,
+		threadTS:         threadTS,
+		activeTools:      make(map[string]string),
+		lastActivityTime: time.Now(),
 	}
+	m.startHeartbeat()
+	return m
+}
+
+// startHeartbeat starts the heartbeat ticker
+func (m *SlackThreadManager) startHeartbeat() {
+	m.heartbeatTicker = time.NewTicker(1 * time.Second)
+	m.heartbeatStop = make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-m.heartbeatTicker.C:
+				m.mu.Lock()
+				elapsed := time.Since(m.lastActivityTime)
+				// Only show heartbeat after 5s of silence
+				if elapsed >= 5*time.Second {
+					elapsedStr := formatDuration(elapsed)
+					heartbeatMsg := fmt.Sprintf(":hourglass_flowing_sand: Working... (%s)", elapsedStr)
+					if m.heartbeatTS == "" {
+						// Create new heartbeat message
+						ts, _ := sendMessageToThreadGetTS(m.config, m.channelID, m.threadTS, heartbeatMsg)
+						m.heartbeatTS = ts
+					} else {
+						// Update existing heartbeat message
+						updateMessage(m.config, m.channelID, m.heartbeatTS, heartbeatMsg)
+					}
+				}
+				m.mu.Unlock()
+			case <-m.heartbeatStop:
+				return
+			}
+		}
+	}()
+}
+
+// stopHeartbeat stops the heartbeat ticker and removes the heartbeat message
+func (m *SlackThreadManager) stopHeartbeat() {
+	if m.heartbeatTicker != nil {
+		m.heartbeatTicker.Stop()
+		close(m.heartbeatStop)
+	}
+	// Delete heartbeat message if it exists
+	if m.heartbeatTS != "" {
+		deleteMessage(m.config, m.channelID, m.heartbeatTS)
+		m.heartbeatTS = ""
+	}
+}
+
+// recordActivity records that activity happened (resets heartbeat timer)
+func (m *SlackThreadManager) recordActivity() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recordActivityLocked()
+}
+
+// recordActivityLocked is the unlocked version (caller must hold mutex)
+func (m *SlackThreadManager) recordActivityLocked() {
+	m.lastActivityTime = time.Now()
+	// If heartbeat message was shown, delete it since we have activity now
+	if m.heartbeatTS != "" {
+		deleteMessage(m.config, m.channelID, m.heartbeatTS)
+		m.heartbeatTS = ""
+	}
+}
+
+// formatDuration formats a duration as "Xs" or "Xm Ys"
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm %ds", mins, secs)
 }
 
 // PostThinking posts a thinking indicator
@@ -372,6 +464,9 @@ func (m *SlackThreadManager) PostSystemInit(event *StreamEvent) {
 func (m *SlackThreadManager) UpdateAssistantText(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Record activity to reset heartbeat
+	m.recordActivityLocked()
 
 	// Flush any pending tool batch before assistant text
 	m.flushToolBatchLocked()
@@ -442,6 +537,9 @@ func (m *SlackThreadManager) PostThinkingBlock(thinking string) {
 func (m *SlackThreadManager) PostToolUseStart(toolName string, toolID string, input json.RawMessage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Record activity
+	m.recordActivityLocked()
 
 	// First, finalize any pending assistant text
 	if m.currentAssistantContent.Len() > 0 {
@@ -514,24 +612,47 @@ func (m *SlackThreadManager) PostToolResult(toolUseID string, result json.RawMes
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Record activity
+	m.recordActivityLocked()
+
 	// Flush any pending tool batch
 	m.flushToolBatchLocked()
 
 	// Format result
-	resultStr := string(result)
-	if len(resultStr) > 1000 {
-		resultStr = resultStr[:1000] + "..."
-	}
+	fullResult := string(result)
+	const previewLimit = 500
+	const snippetThreshold = 1000
 
 	var msg string
 	if isError {
-		msg = fmt.Sprintf(":x: *Error*\n```\n%s\n```", resultStr)
-	} else {
-		// Truncate success results more aggressively
-		if len(resultStr) > 300 {
-			resultStr = resultStr[:300] + "..."
+		// For errors, show more context
+		resultStr := fullResult
+		if len(resultStr) > 1000 {
+			resultStr = resultStr[:1000] + "..."
 		}
-		msg = fmt.Sprintf(":white_check_mark: ```\n%s\n```", resultStr)
+		msg = fmt.Sprintf(":x: *Error*\n```\n%s\n```", resultStr)
+	} else if len(fullResult) > snippetThreshold {
+		// Long output: upload as snippet, show preview
+		preview := fullResult[:previewLimit] + "..."
+		msg = fmt.Sprintf(":white_check_mark: ```\n%s\n```\n_(%d chars total - uploading full output...)_", preview, len(fullResult))
+		sendMessageToThread(m.config, m.channelID, m.threadTS, msg)
+
+		// Upload full result as snippet (async, outside lock)
+		go func() {
+			_, err := uploadSnippet(m.config, m.channelID, m.threadTS, "output.txt", fullResult, "Full output")
+			if err != nil {
+				logf("Failed to upload snippet: %v", err)
+			}
+		}()
+
+		// Clean up and return early since we already sent the message
+		if _, ok := m.activeTools[toolUseID]; ok {
+			delete(m.activeTools, toolUseID)
+		}
+		return
+	} else {
+		// Short output: show inline
+		msg = fmt.Sprintf(":white_check_mark: ```\n%s\n```", fullResult)
 	}
 
 	// Update the tool message if we have it, otherwise post new
@@ -543,6 +664,9 @@ func (m *SlackThreadManager) PostToolResult(toolUseID string, result json.RawMes
 
 // PostFinalResult posts the final result with stats
 func (m *SlackThreadManager) PostFinalResult(resp *ClaudeResponse) {
+	// Stop heartbeat first (outside lock to avoid deadlock)
+	m.stopHeartbeat()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -576,6 +700,9 @@ func (m *SlackThreadManager) PostFinalResult(resp *ClaudeResponse) {
 
 // PostError posts an error message
 func (m *SlackThreadManager) PostError(errMsg string) {
+	// Stop heartbeat first (outside lock to avoid deadlock)
+	m.stopHeartbeat()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -153,24 +153,6 @@ func listen(opts listenOpts) error {
 		os.Exit(0)
 	}()
 
-	// Temp image cleanup - run every 10 minutes
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				logf("Cleanup goroutine stopped")
-				return
-			case <-ticker.C:
-				cleanupTempImages()
-			}
-		}
-	}()
-
 	// Connect via Socket Mode
 	for {
 		select {
@@ -529,34 +511,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		addReaction(config, channelID, event.TS, "eyes")
 		claudeText := text
 
-		// Handle image attachments
-		var imagePaths []string
-		for _, file := range event.Files {
-			if isImageFile(file) {
-				logf("Downloading image: %s (%s)", file.Name, file.Mimetype)
-				localPath, err := downloadSlackFile(config, file)
-				if err != nil {
-					logf("Failed to download image %s: %v", file.Name, err)
-					sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":warning: Failed to download image %s: %v", file.Name, err))
-					continue
-				}
-				imagePaths = append(imagePaths, localPath)
-				logf("Downloaded image to: %s", localPath)
-			}
-		}
-
-		// Build prompt with image paths if present
-		if len(imagePaths) > 0 {
-			imageList := strings.Join(imagePaths, " ")
-			if claudeText == "" {
-				claudeText = fmt.Sprintf("Please analyze this image: %s", imageList)
-			} else {
-				claudeText = fmt.Sprintf("%s\n\nImage(s): %s", claudeText, imageList)
-			}
-			logf("Added %d image(s) to prompt", len(imagePaths))
-		}
-
-		// Find work directory
+		// Find work directory first (needed for file uploads)
 		baseDir := getProjectsDir(config)
 		workDir := filepath.Join(baseDir, sessionName)
 		if _, err := os.Stat(workDir); os.IsNotExist(err) {
@@ -567,6 +522,39 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to create directory: %v", err))
 				return
 			}
+		}
+
+		// Handle file attachments (images and text files)
+		// Save them in workDir/.slack-uploads/ so Claude can access them
+		var filePaths []string
+		if len(event.Files) > 0 {
+			uploadsDir := filepath.Join(workDir, ".slack-uploads")
+			os.MkdirAll(uploadsDir, 0755)
+
+			for _, file := range event.Files {
+				if isImageFile(file) || isTextFile(file) {
+					logf("Downloading file: %s (%s)", file.Name, file.Mimetype)
+					localPath, err := downloadSlackFileToDir(config, file, uploadsDir)
+					if err != nil {
+						logf("Failed to download file %s: %v", file.Name, err)
+						sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":warning: Failed to download file %s: %v", file.Name, err))
+						continue
+					}
+					filePaths = append(filePaths, localPath)
+					logf("Saved file to: %s", localPath)
+				}
+			}
+		}
+
+		// Build prompt with file paths (images and text files)
+		if len(filePaths) > 0 {
+			fileList := strings.Join(filePaths, " ")
+			if claudeText == "" {
+				claudeText = fmt.Sprintf("Please analyze these files: %s", fileList)
+			} else {
+				claudeText = fmt.Sprintf("%s\n\nAttached file(s): %s", claudeText, fileList)
+			}
+			logf("Added %d file(s) to prompt", len(filePaths))
 		}
 
 		// Add remote context to help Claude understand the user's situation
