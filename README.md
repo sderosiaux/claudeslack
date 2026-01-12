@@ -58,16 +58,18 @@ flowchart LR
 ## Why Slack? (vs SSH + tmux)
 
 | SSH + tmux | claudeslack |
-|------------|------|
-| ✅ No extra dependencies | ✅ Works offline (queue messages) |
-| ✅ Direct terminal access | ✅ Voice input via Slack mic |
-| ✅ Full session control | ✅ Threads = persistent sessions |
-| ❌ Requires VPN/Tailscale to home | ✅ Polished mobile UX (swipe channels/threads) |
-| ❌ Clunky on phone keyboards | ❌ Adds Slack as dependency |
-| ❌ No async - needs connection | ❌ Data goes through Slack servers |
+|------------|-------------|
+| ✅ No extra dependencies | ✅ **Push notifications when done** |
+| ✅ Direct terminal access | ✅ **Fire & forget** - check later |
+| ✅ Full session control | ✅ **Unread threads = task inbox** |
+| ❌ Requires VPN/Tailscale | ✅ **Drop images/screenshots** directly |
+| ❌ Terminal on phone = pain | ✅ Voice input while walking |
+| ❌ Must poll for completion | ✅ Native mobile UX (swipe, scroll) |
+| ❌ No notifications when done | ❌ Adds Slack as dependency |
+| ❌ scp/rsync for files = friction | ❌ Data goes through Slack servers |
 
 **Use SSH** if you have Tailscale and don't mind terminal on mobile.
-**Use claudeslack** if you want async messaging, voice input, or hate phone keyboards.
+**Use claudeslack** if you want to fire off tasks and get notified when done.
 
 ### Other Slack benefits
 
