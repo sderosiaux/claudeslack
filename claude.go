@@ -533,7 +533,20 @@ func (m *SlackThreadManager) PostThinkingBlock(thinking string) {
 	sendMessageToThread(m.config, m.channelID, m.threadTS, msg)
 }
 
-// PostToolUseStart posts a tool use start message (batched for same tool within 1s)
+// getToolBatchGroup returns the batch group for a tool (tools in same group are batched together)
+func getToolBatchGroup(toolName string) string {
+	switch toolName {
+	case "Read", "Bash", "Grep", "Glob":
+		return "read"
+	case "Write", "Edit":
+		return "write"
+	case "WebFetch", "WebSearch":
+		return "web"
+	}
+	return toolName // Each other tool is its own group
+}
+
+// PostToolUseStart posts a tool use start message (batched for similar tools within 1s)
 func (m *SlackThreadManager) PostToolUseStart(toolName string, toolID string, input json.RawMessage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -550,9 +563,11 @@ func (m *SlackThreadManager) PostToolUseStart(toolName string, toolID string, in
 
 	inputStr := formatToolInput(toolName, input)
 
-	// If same tool as current batch, add to batch
-	if m.batchedToolName == toolName {
-		m.batchedToolInputs = append(m.batchedToolInputs, inputStr)
+	// Check if we can batch this tool with the current batch (same group)
+	canBatch := m.batchedToolName != "" && getToolBatchGroup(m.batchedToolName) == getToolBatchGroup(toolName)
+
+	if canBatch {
+		m.batchedToolInputs = append(m.batchedToolInputs, fmt.Sprintf("%s %s", getToolEmoji(toolName), inputStr))
 		// Reset timer
 		if m.batchedToolTimer != nil {
 			m.batchedToolTimer.Stop()
@@ -563,14 +578,14 @@ func (m *SlackThreadManager) PostToolUseStart(toolName string, toolID string, in
 		return
 	}
 
-	// Different tool - flush existing batch first
+	// Different tool category - flush existing batch first
 	if m.batchedToolName != "" {
 		m.flushToolBatchLocked()
 	}
 
 	// Start new batch
 	m.batchedToolName = toolName
-	m.batchedToolInputs = []string{inputStr}
+	m.batchedToolInputs = []string{fmt.Sprintf("%s %s", getToolEmoji(toolName), inputStr)}
 	m.batchedToolTimer = time.AfterFunc(1*time.Second, func() {
 		m.flushToolBatch()
 	})
@@ -594,13 +609,8 @@ func (m *SlackThreadManager) flushToolBatchLocked() {
 		m.batchedToolTimer = nil
 	}
 
-	emoji := getToolEmoji(m.batchedToolName)
-	var msg string
-	if len(m.batchedToolInputs) == 1 {
-		msg = fmt.Sprintf("%s *%s*\n%s", emoji, m.batchedToolName, m.batchedToolInputs[0])
-	} else {
-		msg = fmt.Sprintf("%s *%s* ×%d\n%s", emoji, m.batchedToolName, len(m.batchedToolInputs), strings.Join(m.batchedToolInputs, "\n"))
-	}
+	// Each input already has its emoji prefix, just join them
+	msg := strings.Join(m.batchedToolInputs, "\n")
 	sendMessageToThread(m.config, m.channelID, m.threadTS, msg)
 
 	m.batchedToolName = ""
@@ -796,7 +806,6 @@ func formatToolInput(toolName string, input json.RawMessage) string {
 	return fmt.Sprintf("`%s`", s)
 }
 
-// ============================================================================
 // Main streaming function
 // ============================================================================
 
@@ -939,14 +948,70 @@ func getClaudeSessionID(channelID string) (string, bool) {
 	return "", false
 }
 
+// convertBold converts markdown **bold** to Slack *bold*
+func convertBold(text string) string {
+	for strings.Contains(text, "**") {
+		start := strings.Index(text, "**")
+		end := strings.Index(text[start+2:], "**")
+		if end == -1 {
+			break
+		}
+		end += start + 2
+		content := text[start+2 : end]
+		text = text[:start] + "*" + content + "*" + text[end+2:]
+	}
+	return text
+}
+
 // markdownToSlack converts GitHub-flavored markdown to Slack mrkdwn
 func markdownToSlack(text string) string {
 	lines := strings.Split(text, "\n")
 	var result []string
 	inCodeBlock := false
+	var tableRows [][]string // Store rows as slices of cells
+
+	flushTable := func() {
+		if len(tableRows) == 0 {
+			return
+		}
+
+		// Calculate max width for each column
+		colWidths := make([]int, 0)
+		for _, row := range tableRows {
+			for i, cell := range row {
+				if i >= len(colWidths) {
+					colWidths = append(colWidths, len(cell))
+				} else if len(cell) > colWidths[i] {
+					colWidths[i] = len(cell)
+				}
+			}
+		}
+
+		// Format each row with padding
+		result = append(result, "```")
+		for _, row := range tableRows {
+			var paddedCells []string
+			for i, cell := range row {
+				// Don't pad the last column
+				if i == len(row)-1 {
+					paddedCells = append(paddedCells, cell)
+				} else {
+					width := 0
+					if i < len(colWidths) {
+						width = colWidths[i]
+					}
+					paddedCells = append(paddedCells, fmt.Sprintf("%-*s", width, cell))
+				}
+			}
+			result = append(result, strings.Join(paddedCells, " | "))
+		}
+		result = append(result, "```")
+		tableRows = nil
+	}
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "```") {
+			flushTable()
 			inCodeBlock = !inCodeBlock
 			result = append(result, line)
 			continue
@@ -956,8 +1021,17 @@ func markdownToSlack(text string) string {
 			continue
 		}
 
-		// Convert horizontal rules (---, ***, ___) to Unicode line
 		trimmed := strings.TrimSpace(line)
+
+		// Check if this is a table line
+		isTableLine := strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|")
+
+		// If we were in a table and this line isn't a table line, flush
+		if len(tableRows) > 0 && !isTableLine {
+			flushTable()
+		}
+
+		// Convert horizontal rules (---, ***, ___) to Unicode line
 		if trimmed == "---" || trimmed == "***" || trimmed == "___" {
 			result = append(result, "───────────────────────")
 			continue
@@ -976,41 +1050,37 @@ func markdownToSlack(text string) string {
 			}
 		}
 
-		// Convert tables
-		if strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") {
+		// Collect table rows
+		if isTableLine {
+			// Skip separator lines (|---|---|)
 			if strings.Contains(trimmed, "---") {
 				continue
 			}
+			// Parse cells
 			cells := strings.Split(trimmed, "|")
 			var cleanCells []string
 			for _, cell := range cells {
 				cell = strings.TrimSpace(cell)
-				if cell != "" {
-					cleanCells = append(cleanCells, cell)
+				if cell == "" {
+					continue // Skip empty cells from leading/trailing |
 				}
+				// Remove markdown bold markers
+				cell = strings.TrimPrefix(cell, "**")
+				cell = strings.TrimSuffix(cell, "**")
+				cleanCells = append(cleanCells, cell)
 			}
-			if len(cleanCells) >= 2 {
-				result = append(result, fmt.Sprintf("*%s*: %s", cleanCells[0], strings.Join(cleanCells[1:], " | ")))
-			} else if len(cleanCells) == 1 {
-				result = append(result, cleanCells[0])
-			}
+			tableRows = append(tableRows, cleanCells)
 			continue
 		}
 
-		// Convert **bold** to *bold*
-		for strings.Contains(line, "**") {
-			start := strings.Index(line, "**")
-			end := strings.Index(line[start+2:], "**")
-			if end == -1 {
-				break
-			}
-			end += start + 2
-			content := line[start+2 : end]
-			line = line[:start] + "*" + content + "*" + line[end+2:]
-		}
+		// Convert bold markdown to Slack format
+		line = convertBold(line)
 
 		result = append(result, line)
 	}
+
+	// Flush any remaining table
+	flushTable()
 
 	return strings.Join(result, "\n")
 }

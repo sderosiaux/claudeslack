@@ -72,7 +72,7 @@ flowchart LR
 | **Multi-Project** | Each Slack channel maps to a project folder |
 | **Session Memory** | Conversations persist across messages |
 | **Visual Status** | 👀 processing → ✅ done (or ❌ error) |
-| **Images** | Drop screenshots in Slack for Claude to analyze |
+| **File Uploads** | Drop images or code files - saved to project's `.slack-uploads/` folder |
 | **Interactive** | Answer Claude's questions via buttons |
 
 ## Requirements
@@ -170,16 +170,23 @@ Project folder: ~/code/ai-projects/my-cool-project  (or "my cool project")
 
 The bot handles hyphen/space conversion (Slack uses hyphens, folders may use spaces).
 
-### Image Support
+### File Uploads
 
-Drop images directly in Slack messages. They're downloaded and passed to Claude for analysis:
+Drop files directly in Slack messages - they're automatically downloaded to your project and passed to Claude:
 
 ```
 You: [attaches screenshot.png] "What's wrong with this error?"
+→ File saved to ~/projects/my-webapp/.slack-uploads/screenshot.png
 → Claude analyzes the image and responds
+
+You: [attaches config.yaml] "Review this config"
+→ File saved and content passed to Claude
 ```
 
-Supported formats: PNG, JPG, GIF, WebP
+- **Images** (PNG, JPG, GIF, WebP) - Claude sees them visually
+- **Code/text files** - Content is read and included in the prompt
+- Files persist in `.slack-uploads/` so Claude can reference them later
+- Visible in Slack AND accessible in your workspace
 
 ### Reaction Status
 

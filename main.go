@@ -49,7 +49,8 @@ func getHelpText() string {
 		"• `!version` - Show version\n" +
 		"• `!help` - Show this help\n\n" +
 		":speech_balloon: *In a session channel:*\n" +
-		"• Type messages to talk to Claude\n" +
+		"• Type messages → Claude responds in channel\n" +
+		"• `!task <prompt>` - Start a task in a dedicated thread\n" +
 		"• `!claude_compact` - Summarize conversation (reduce tokens)\n" +
 		"• `!claude_clear` - Clear session and start fresh\n" +
 		"• `!claude_help` - Show Claude-specific commands"
@@ -326,6 +327,67 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		return
 	}
 
+	// !task <prompt> - creates a thread for the task (original behavior)
+	if strings.HasPrefix(text, "!task ") {
+		taskPrompt := strings.TrimSpace(strings.TrimPrefix(text, "!task "))
+		if taskPrompt == "" {
+			reply("Usage: `!task <prompt>` - start a task in a thread")
+			return
+		}
+
+		// Check if we're in a session channel
+		sessionName := cfgMgr.GetSessionByChannel(channelID)
+		if sessionName == "" {
+			// Try auto-detect from channel name
+			channelName, err := getChannelName(config, channelID)
+			if err == nil && channelName != "" {
+				baseDir := getProjectsDir(config)
+				projectDir := filepath.Join(baseDir, channelName)
+				if _, err := os.Stat(projectDir); os.IsNotExist(err) {
+					altName := strings.ReplaceAll(channelName, "-", " ")
+					altDir := filepath.Join(baseDir, altName)
+					if _, err := os.Stat(altDir); err == nil {
+						projectDir = altDir
+						sessionName = altName
+					}
+				} else {
+					sessionName = channelName
+				}
+				if sessionName != "" {
+					cfgMgr.SetSession(sessionName, channelID)
+				}
+			}
+		}
+
+		if sessionName == "" {
+			reply(":x: Not in a session channel. Use in a channel that matches a project folder.")
+			return
+		}
+
+		baseDir := getProjectsDir(config)
+		workDir := filepath.Join(baseDir, sessionName)
+
+		addReaction(config, channelID, event.TS, "eyes")
+		prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + taskPrompt
+
+		workerPool.Submit(func() {
+			// Pass event.TS as threadTS to create a thread
+			resp, err := callClaudeStreaming(prompt, channelID, event.TS, workDir, config)
+			if err != nil {
+				logf("Claude error: %v", err)
+				addReaction(config, channelID, event.TS, "x")
+				removeReaction(config, channelID, event.TS, "eyes")
+				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Claude error: %v", err))
+				return
+			}
+			removeReaction(config, channelID, event.TS, "eyes")
+			addReaction(config, channelID, event.TS, "white_check_mark")
+			logf("Claude responded (session: %s, tokens: %d in / %d out)",
+				resp.SessionID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		})
+		return
+	}
+
 	if strings.HasPrefix(text, "!sessions") || strings.HasPrefix(text, "!list") {
 		sessions := cfgMgr.GetAllSessions()
 		if len(sessions) == 0 {
@@ -458,8 +520,8 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		return
 	}
 
-	// Unknown ! command - show help
-	if strings.HasPrefix(text, "!") {
+	// Unknown ! command (except !claude_* which is handled below in session context)
+	if strings.HasPrefix(text, "!") && !strings.HasPrefix(text, "!claude_") {
 		logf("Unknown command: %s", text)
 		reply(fmt.Sprintf(":question: Unknown command `%s`\n\n%s", strings.Split(text, " ")[0], getHelpText()))
 		return
@@ -502,6 +564,25 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 					"• `!claude_help` - Show this help"
 				sendMessageToThread(config, channelID, event.TS, helpMsg)
 				return
+			case "raw":
+				// Get last response raw (no formatting)
+				addReaction(config, channelID, event.TS, "eyes")
+				workerPool.Submit(func() {
+					baseDir := getProjectsDir(config)
+					workDir := filepath.Join(baseDir, sessionName)
+					// Ask Claude to repeat last response
+					resp, err := callClaudeJSON("Please repeat your last response exactly as you wrote it, without any changes.", channelID, workDir)
+					removeReaction(config, channelID, event.TS, "eyes")
+					if err != nil {
+						addReaction(config, channelID, event.TS, "x")
+						sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Error: %v", err))
+					} else {
+						addReaction(config, channelID, event.TS, "white_check_mark")
+						// Send raw response in code block (no markdown conversion)
+						sendMessageToThread(config, channelID, event.TS, "```\n"+resp.Result+"\n```")
+					}
+				})
+				return
 			default:
 				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":question: Unknown command `!claude_%s`. Try `!claude_help`", claudeCmd))
 				return
@@ -519,7 +600,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 				logf("Failed to create directory %s: %v", workDir, err)
 				addReaction(config, channelID, event.TS, "x")
 				removeReaction(config, channelID, event.TS, "eyes")
-				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Failed to create directory: %v", err))
+				reply(fmt.Sprintf(":x: Failed to create directory: %v", err))
 				return
 			}
 		}
@@ -537,7 +618,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 					localPath, err := downloadSlackFileToDir(config, file, uploadsDir)
 					if err != nil {
 						logf("Failed to download file %s: %v", file.Name, err)
-						sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":warning: Failed to download file %s: %v", file.Name, err))
+						reply(fmt.Sprintf(":warning: Failed to download file %s: %v", file.Name, err))
 						continue
 					}
 					filePaths = append(filePaths, localPath)
@@ -560,15 +641,19 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		// Add remote context to help Claude understand the user's situation
 		prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + claudeText
 
+		// Determine threadTS: if already in a thread, continue there; otherwise respond in channel
+		// threadTS is already set from event.ThreadTS at the top
+		// If not in a thread (threadTS == ""), responses go to channel directly
+
 		// Call Claude using streaming mode (handles session resumption automatically)
-		logf("Calling Claude in streaming mode for channel %s", channelID)
+		logf("Calling Claude in streaming mode for channel %s (thread: %v)", channelID, threadTS != "")
 		workerPool.Submit(func() {
-			resp, err := callClaudeStreaming(prompt, channelID, event.TS, workDir, config)
+			resp, err := callClaudeStreaming(prompt, channelID, threadTS, workDir, config)
 			if err != nil {
 				logf("Claude error: %v", err)
 				addReaction(config, channelID, event.TS, "x")
 				removeReaction(config, channelID, event.TS, "eyes")
-				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Claude error: %v", err))
+				reply(fmt.Sprintf(":x: Claude error: %v", err))
 				return
 			}
 
@@ -614,13 +699,14 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 
 			prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + text
 
+			// If already in a thread, continue there; otherwise respond in channel
 			workerPool.Submit(func() {
-				resp, err := callClaudeStreaming(prompt, channelID, event.TS, projectDir, config)
+				resp, err := callClaudeStreaming(prompt, channelID, threadTS, projectDir, config)
 				if err != nil {
 					logf("Claude error: %v", err)
 					addReaction(config, channelID, event.TS, "x")
 					removeReaction(config, channelID, event.TS, "eyes")
-					sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":x: Claude error: %v", err))
+					reply(fmt.Sprintf(":x: Claude error: %v", err))
 					return
 				}
 
@@ -631,6 +717,12 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 			})
 			return
 		}
+	}
+
+	// !claude_* commands outside session context
+	if strings.HasPrefix(text, "!claude_") {
+		reply(":x: Use `!claude_*` commands in a session channel")
+		return
 	}
 
 	// Otherwise, run one-shot Claude
