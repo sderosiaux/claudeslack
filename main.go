@@ -23,10 +23,11 @@ const version = "2.0.0"
 // buildTime is set at compile time via -ldflags
 var buildTime = "dev"
 
-// Global config manager and worker pool for graceful shutdown
+// Global config manager, worker pool and message queue
 var (
-	configMgr  *ConfigManager
-	workerPool *WorkerPool
+	configMgr    *ConfigManager
+	workerPool   *WorkerPool
+	messageQueue *ChannelQueue
 )
 
 func logf(format string, args ...interface{}) {
@@ -35,7 +36,7 @@ func logf(format string, args ...interface{}) {
 }
 
 func getHelpText() string {
-	return "*Claude Code Slack Anywhere - Commands*\n\n" +
+	return "*claudeslack - Commands*\n\n" +
 		":rocket: *Session Management*\n" +
 		"• `!new <name>` - Create new session with channel\n" +
 		"• `!reset` - Reset conversation context (start fresh)\n" +
@@ -125,6 +126,9 @@ func listen(opts listenOpts) error {
 
 	// Initialize worker pool (max 50 concurrent handlers)
 	workerPool = NewWorkerPool(ctx, 50)
+
+	// Initialize message queue for automatic queuing
+	messageQueue = NewChannelQueue()
 
 	// WaitGroup for background goroutines
 	var wg sync.WaitGroup
@@ -645,24 +649,27 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		// threadTS is already set from event.ThreadTS at the top
 		// If not in a thread (threadTS == ""), responses go to channel directly
 
-		// Call Claude using streaming mode (handles session resumption automatically)
-		logf("Calling Claude in streaming mode for channel %s (thread: %v)", channelID, threadTS != "")
-		workerPool.Submit(func() {
-			resp, err := callClaudeStreaming(prompt, channelID, threadTS, workDir, config)
-			if err != nil {
-				logf("Claude error: %v", err)
-				addReaction(config, channelID, event.TS, "x")
-				removeReaction(config, channelID, event.TS, "eyes")
-				reply(fmt.Sprintf(":x: Claude error: %v", err))
-				return
-			}
+		// Submit to queue - will process immediately if channel is free, otherwise queue
+		msg := &QueuedMessage{
+			Text:      prompt,
+			ChannelID: channelID,
+			ThreadTS:  threadTS,
+			EventTS:   event.TS,
+			WorkDir:   workDir,
+		}
 
-			// Success - update reactions (response already sent by streaming)
+		queued, position := messageQueue.Submit(msg)
+		if queued {
+			// Message was queued, notify user
+			logf("Message queued for channel %s (position: %d)", channelID, position)
 			removeReaction(config, channelID, event.TS, "eyes")
-			addReaction(config, channelID, event.TS, "white_check_mark")
-			logf("Claude responded (session: %s, tokens: %d in / %d out)",
-				resp.SessionID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
-		})
+			addReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+			sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":hourglass: Queued (position %d) - will run after current task", position))
+		} else {
+			// Process immediately
+			logf("Calling Claude in streaming mode for channel %s (thread: %v)", channelID, threadTS != "")
+			processClaudeMessage(msg, config, reply)
+		}
 		return
 	}
 
@@ -699,22 +706,25 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 
 			prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + text
 
-			// If already in a thread, continue there; otherwise respond in channel
-			workerPool.Submit(func() {
-				resp, err := callClaudeStreaming(prompt, channelID, threadTS, projectDir, config)
-				if err != nil {
-					logf("Claude error: %v", err)
-					addReaction(config, channelID, event.TS, "x")
-					removeReaction(config, channelID, event.TS, "eyes")
-					reply(fmt.Sprintf(":x: Claude error: %v", err))
-					return
-				}
+			// Submit to queue
+			msg := &QueuedMessage{
+				Text:      prompt,
+				ChannelID: channelID,
+				ThreadTS:  threadTS,
+				EventTS:   event.TS,
+				WorkDir:   projectDir,
+			}
 
+			queued, position := messageQueue.Submit(msg)
+			if queued {
+				logf("Message queued for channel %s (position: %d)", channelID, position)
 				removeReaction(config, channelID, event.TS, "eyes")
-				addReaction(config, channelID, event.TS, "white_check_mark")
-				logf("Claude responded (session: %s, tokens: %d in / %d out)",
-					resp.SessionID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
-			})
+				addReaction(config, channelID, event.TS, "hourglass_flowing_sand")
+				sendMessageToThread(config, channelID, event.TS, fmt.Sprintf(":hourglass: Queued (position %d) - will run after current task", position))
+			} else {
+				logf("Calling Claude in streaming mode for channel %s (thread: %v)", channelID, threadTS != "")
+				processClaudeMessage(msg, config, reply)
+			}
 			return
 		}
 	}
@@ -737,6 +747,43 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 			}
 		}
 		sendMessage(config, channelID, output)
+	})
+}
+
+// processClaudeMessage handles a Claude request and processes the queue
+func processClaudeMessage(msg *QueuedMessage, config *Config, reply func(string)) {
+	workerPool.Submit(func() {
+		// Process the message
+		resp, err := callClaudeStreaming(msg.Text, msg.ChannelID, msg.ThreadTS, msg.WorkDir, config)
+
+		// Remove hourglass if it was queued
+		removeReaction(config, msg.ChannelID, msg.EventTS, "hourglass_flowing_sand")
+
+		if err != nil {
+			logf("Claude error: %v", err)
+			addReaction(config, msg.ChannelID, msg.EventTS, "x")
+			removeReaction(config, msg.ChannelID, msg.EventTS, "eyes")
+			reply(fmt.Sprintf(":x: Claude error: %v", err))
+		} else {
+			// Success - update reactions (response already sent by streaming)
+			removeReaction(config, msg.ChannelID, msg.EventTS, "eyes")
+			addReaction(config, msg.ChannelID, msg.EventTS, "white_check_mark")
+			logf("Claude responded (session: %s, tokens: %d in / %d out)",
+				resp.SessionID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		}
+
+		// Process next in queue
+		if next := messageQueue.Done(msg.ChannelID); next != nil {
+			logf("Processing next queued message for channel %s", msg.ChannelID)
+			// Update reaction on the queued message
+			removeReaction(config, next.ChannelID, next.EventTS, "hourglass_flowing_sand")
+			addReaction(config, next.ChannelID, next.EventTS, "eyes")
+			// Create reply function for the queued message
+			nextReply := func(text string) {
+				sendMessageToThread(config, next.ChannelID, next.ThreadTS, text)
+			}
+			processClaudeMessage(next, config, nextReply)
+		}
 	})
 }
 

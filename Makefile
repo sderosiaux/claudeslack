@@ -1,6 +1,6 @@
 .PHONY: build install clean restart reload
 
-BINARY=claude-code-slack-anywhere
+BINARY=claudeslack
 BUILD_TIME=$(shell date +%Y%m%d-%H%M%S)
 LDFLAGS=-ldflags "-X main.buildTime=$(BUILD_TIME)"
 

@@ -1,4 +1,4 @@
-# Claude Code Slack Anywhere
+# claudeslack
 
 ## Build & Deploy
 

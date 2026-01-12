@@ -795,6 +795,27 @@ func formatToolInput(toolName string, input json.RawMessage) string {
 		if query, ok := data["query"].(string); ok {
 			return fmt.Sprintf("_%s_", query)
 		}
+	case "todowrite":
+		if todos, ok := data["todos"].([]interface{}); ok {
+			var items []string
+			for _, t := range todos {
+				if todo, ok := t.(map[string]interface{}); ok {
+					content, _ := todo["content"].(string)
+					status, _ := todo["status"].(string)
+					emoji := ":white_circle:"
+					switch status {
+					case "completed":
+						emoji = ":white_check_mark:"
+					case "in_progress":
+						emoji = ":arrow_forward:"
+					}
+					items = append(items, fmt.Sprintf("%s %s", emoji, content))
+				}
+			}
+			if len(items) > 0 {
+				return strings.Join(items, "\n")
+			}
+		}
 	}
 
 	// Default: show truncated JSON

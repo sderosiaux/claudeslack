@@ -75,7 +75,7 @@ func installSystemdService(home string) error {
 
 	servicePath := filepath.Join(serviceDir, "ccsa.service")
 	service := fmt.Sprintf(`[Unit]
-Description=Claude Code Slack Anywhere
+Description=claudeslack
 After=network.target
 
 [Service]
@@ -102,7 +102,7 @@ WantedBy=default.target
 }
 
 func setup(botToken, appToken string) error {
-	fmt.Println("Claude Code Slack Anywhere Setup")
+	fmt.Println("claudeslack Setup")
 	fmt.Println("========================")
 	fmt.Println()
 

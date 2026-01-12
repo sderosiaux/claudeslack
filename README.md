@@ -1,8 +1,8 @@
-# Claude Code Slack Anywhere
+# claudeslack
 
-> Control [Claude Code](https://docs.anthropic.com/en/docs/claude-code) from your phone. Each Slack channel = one project folder on your machine.
+> Control [Claude Code](https://docs.anthropic.com/en/docs/claude-code) from your phone via Slack. Each channel = one project folder on your machine.
 
-![CCSA Slack Interface](docs/slack-interface.png)
+![claudeslack Interface](docs/slack-interface.png)
 
 ```mermaid
 flowchart LR
@@ -13,7 +13,7 @@ flowchart LR
     end
 
     subgraph pc["Your PC"]
-        B[CCSA Listener]
+        B[claudeslack]
         D[Claude Code CLI]
         P1[~/projects/project-a]
         P2[~/projects/project-b]
@@ -55,12 +55,23 @@ flowchart LR
    └─ ✅
 ```
 
-## Why Slack?
+## Why Slack? (vs SSH + tmux)
 
-- **Works offline** - Queue messages while commuting, responses arrive when you're back online (both input AND output work async)
-- **Voice input** - Slack's built-in microphone means hands-free coding prompts
-- **Threads = Sessions** - Each thread is a task with full context continuity. New message = new task
-- **Familiar UX** - No new app to learn, works on phone/desktop
+| SSH + tmux | claudeslack |
+|------------|------|
+| ✅ No extra dependencies | ✅ Works offline (queue messages) |
+| ✅ Direct terminal access | ✅ Voice input via Slack mic |
+| ✅ Full session control | ✅ Threads = persistent sessions |
+| ❌ Requires VPN/Tailscale to home | ✅ Polished mobile UX (swipe channels/threads) |
+| ❌ Clunky on phone keyboards | ❌ Adds Slack as dependency |
+| ❌ No async - needs connection | ❌ Data goes through Slack servers |
+
+**Use SSH** if you have Tailscale and don't mind terminal on mobile.
+**Use claudeslack** if you want async messaging, voice input, or hate phone keyboards.
+
+### Other Slack benefits
+
+- **Familiar UX** - No new app to learn
 - **Shareable** - Invite teammates to project channels (if you trust them!)
 - **Rich formatting** - Code blocks, threads, reactions, file uploads
 - **Free tier** - Works with Slack's free plan
@@ -85,10 +96,10 @@ flowchart LR
 ## Installation
 
 ```bash
-git clone https://github.com/sderosiaux/claude-code-slack-anywhere.git
-cd claude-code-slack-anywhere
-go build -o claude-code-slack-anywhere .
-mv claude-code-slack-anywhere ~/bin/  # or anywhere in PATH
+git clone https://github.com/sderosiaux/claudeslack.git
+cd claudeslack
+go build -o claudeslack .
+mv claudeslack ~/bin/  # or anywhere in PATH
 ```
 
 ## Quick Start
@@ -110,7 +121,7 @@ Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** �
 ### 2. Run Setup
 
 ```bash
-claude-code-slack-anywhere setup xoxb-YOUR-BOT-TOKEN xapp-YOUR-APP-TOKEN
+claudeslack setup xoxb-YOUR-BOT-TOKEN xapp-YOUR-APP-TOKEN
 ```
 
 Get your User ID: Slack → Profile → **...** → **Copy member ID**
@@ -118,12 +129,12 @@ Get your User ID: Slack → Profile → **...** → **Copy member ID**
 ### 3. Start the Listener
 
 ```bash
-claude-code-slack-anywhere listen
+claudeslack listen
 ```
 
 Or with CLI options (override config file):
 ```bash
-claude-code-slack-anywhere listen \
+claudeslack listen \
   --config ~/.ccsa.json \
   --projects-dir ~/code/ai-projects \
   --bot-token xoxb-... \
@@ -221,23 +232,44 @@ Config is stored in `~/.ccsa.json`:
 
 > **Note:** `user_id` (singular string) is still supported for backward compatibility.
 
-## Security
+## Security & Threat Model
 
-**What goes where:**
-- Your **code files** stay on your machine (Claude Code runs locally)
-- Your **prompts and responses** go through Slack's servers
-- Claude API calls go to Anthropic (handled by Claude Code)
+### What Actually Happens to Your Data
 
-**Safeguards:**
-- Bot only responds to configured `user_id`
+| Data | Where it goes |
+|------|---------------|
+| Your prompt | Slack servers → Your machine |
+| File contents Claude reads | Your machine → Anthropic API |
+| Claude's response | Anthropic → Your machine → Slack servers |
+| File writes | Local only |
+
+**Translation:** Your code *files* stay local, but their *contents* go to Anthropic when Claude reads them. Your prompts and responses are stored in Slack's infrastructure.
+
+### What This Is
+
+- A weekend hack, not enterprise software
+- Convenience tool for personal use
+- Uses `--dangerously-skip-permissions`
+- Single-user, single-machine design
+
+### Safeguards
+
+- Allowlist of Slack user IDs
 - Config stored with `0600` permissions
 - Socket Mode (no public webhook URL)
-- Open source - audit it yourself
+- Open source - audit the code
 
-**Heads up:**
-- Uses `--dangerously-skip-permissions` for automation
+### Don't Use For
+
+- ❌ Production codebases
+- ❌ Code under NDA
+- ❌ Client work with confidentiality clauses
+- ❌ Shared workspaces without consent
+
+### Other Risks
+
 - `!c <cmd>` executes shell commands - disable if you don't need it
-- Anyone with access to your Slack workspace channels can see conversations
+- Anyone with access to your Slack channels can see conversations
 
 ## Running as a Service (macOS)
 
