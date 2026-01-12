@@ -495,6 +495,51 @@
       font-size: var(--font-size-lg);
     }
 
+    .flow-container {
+      display: grid;
+      grid-template-columns: 1fr 1.5fr;
+      gap: var(--space-12);
+      align-items: center;
+    }
+
+    @media (max-width: 900px) {
+      .flow-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .flow-explanation {
+      background: var(--color-gray-50);
+      border-radius: var(--radius-lg);
+      padding: var(--space-8);
+      border-left: 4px solid var(--color-primary);
+    }
+
+    .flow-explanation h3 {
+      margin-bottom: var(--space-4);
+      color: var(--color-gray-900);
+    }
+
+    .flow-explanation ol {
+      margin: 0;
+      padding-left: var(--space-6);
+      color: var(--color-gray-700);
+    }
+
+    .flow-explanation li {
+      margin-bottom: var(--space-3);
+      line-height: 1.6;
+    }
+
+    .flow-explanation li:last-child {
+      margin-bottom: 0;
+    }
+
+    .flow-explanation code {
+      background: var(--color-white);
+      font-size: var(--font-size-sm);
+    }
+
     .flow-visual {
       text-align: center;
     }
@@ -1120,8 +1165,20 @@
           <h2>How It Works</h2>
           <p>Send messages from Slack, Claude Code executes on your machine</p>
         </div>
-        <div class="flow-visual fade-in stagger-1">
-          <img src="architecture-diagram.png" alt="Technical architecture: Slack channels connect via WebSocket to claudeslack Go daemon, which spawns Claude Code CLI subprocesses with stdin/stdout pipes to read/write project folders" class="flow-image">
+        <div class="flow-container">
+          <div class="flow-explanation fade-in stagger-1">
+            <h3>The Flow</h3>
+            <ol>
+              <li><strong>You type</strong> in a Slack channel from your phone</li>
+              <li><strong>claudeslack</strong> receives via WebSocket (Socket Mode)</li>
+              <li><strong>Spawns</strong> <code>claude --resume</code> in your project folder</li>
+              <li><strong>Claude Code</strong> reads/writes files, runs commands</li>
+              <li><strong>Response</strong> streams back to Slack thread</li>
+            </ol>
+          </div>
+          <div class="flow-visual fade-in stagger-2">
+            <img src="architecture-diagram.png" alt="Technical architecture: Slack channels connect via WebSocket to claudeslack Go daemon, which spawns Claude Code CLI subprocesses with stdin/stdout pipes to read/write project folders" class="flow-image">
+          </div>
         </div>
       </div>
     </section>
