@@ -278,6 +278,7 @@ func callClaudeJSON(prompt string, channelID string, workDir string) (*ClaudeRes
 		"-p", prompt,
 		"--dangerously-skip-permissions",
 		"--output-format", "json",
+		"--append-system-prompt", SlackSystemPromptAppend,
 	}
 
 	if sid, ok := claudeSessionIDs.Load(channelID); ok {
@@ -911,6 +912,7 @@ func callClaudeStreaming(prompt string, channelID string, threadTS string, workD
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--verbose",
+		"--append-system-prompt", SlackSystemPromptAppend,
 	}
 
 	if sid, ok := claudeSessionIDs.Load(channelID); ok {

@@ -23,6 +23,21 @@ const version = "2.0.0"
 // buildTime is set at compile time via -ldflags
 var buildTime = "dev"
 
+// User prompt prefix - context for each message
+const slackUserPrefix = "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] "
+
+// System prompt additions via --append-system-prompt
+const SlackSystemPromptAppend = `
+IMPORTANT - Background processes:
+- This is a non-interactive session. When you exit, ALL background processes you started will be killed.
+- NEVER use & or nohup for long-running processes - they will die immediately.
+- For servers/daemons, use process managers that persist: pm2, screen, tmux, or systemd.
+- Examples:
+  - pm2 start server.js --name myserver
+  - screen -dmS myserver node server.js
+  - tmux new-session -d -s myserver 'node server.js'
+`
+
 // Global config manager, worker pool and message queue
 var (
 	configMgr    *ConfigManager
@@ -265,6 +280,7 @@ func connectSocketMode(ctx context.Context, cfgMgr *ConfigManager) error {
 func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json.RawMessage) {
 	var event struct {
 		Type     string      `json:"type"`
+		Subtype  string      `json:"subtype"`
 		Channel  string      `json:"channel"`
 		User     string      `json:"user"`
 		Text     string      `json:"text"`
@@ -277,6 +293,11 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 
 	// Ignore bot messages
 	if event.BotID != "" {
+		return
+	}
+
+	// Ignore system messages (joins, leaves, topic changes, etc.)
+	if event.Subtype != "" {
 		return
 	}
 
@@ -372,7 +393,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		workDir := filepath.Join(baseDir, sessionName)
 
 		addReaction(config, channelID, event.TS, "eyes")
-		prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + taskPrompt
+		prompt := slackUserPrefix + taskPrompt
 
 		workerPool.Submit(func() {
 			// Pass event.TS as threadTS to create a thread
@@ -643,7 +664,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 		}
 
 		// Add remote context to help Claude understand the user's situation
-		prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + claudeText
+		prompt := slackUserPrefix + claudeText
 
 		// Determine threadTS: if already in a thread, continue there; otherwise respond in channel
 		// threadTS is already set from event.ThreadTS at the top
@@ -704,7 +725,7 @@ func handleSlackEvent(ctx context.Context, cfgMgr *ConfigManager, eventData json
 			// Handle as session message using streaming mode
 			addReaction(config, channelID, event.TS, "eyes")
 
-			prompt := "[REMOTE via Slack - I cannot see your screen or open files locally. Please show relevant output/content in your responses.] " + text
+			prompt := slackUserPrefix + text
 
 			// Submit to queue
 			msg := &QueuedMessage{
